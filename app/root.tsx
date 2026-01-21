@@ -1,34 +1,30 @@
+// app/root.tsx
 import {
-  isRouteErrorResponse,
   Links,
   Meta,
   Outlet,
   Scripts,
   ScrollRestoration,
+  isRouteErrorResponse,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
 
-export const links: Route.LinksFunction = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous",
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
-  },
-];
-
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* Ajuste de Viewport para Mobile (evita zoom indesejado e escala correta) */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+        
+        {/* Cor da barra de status do navegador no celular */}
+        <meta name="theme-color" content="#030712" />
+        
+        {/* Link para o Manifesto PWA (Identidade do App) */}
+        <link rel="manifest" href="/manifest.json" />
+        
         <Meta />
         <Links />
       </head>
@@ -45,6 +41,7 @@ export default function App() {
   return <Outlet />;
 }
 
+// Tratamento de erros
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let message = "Oops!";
   let details = "An unexpected error occurred.";
@@ -62,11 +59,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
-      <h1>{message}</h1>
-      <p>{details}</p>
+    <main className="pt-16 p-4 container mx-auto text-white">
+      <h1 className="text-2xl font-bold text-red-500 mb-2">{message}</h1>
+      <p className="text-gray-300">{details}</p>
       {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
+        <pre className="w-full p-4 overflow-x-auto bg-gray-900 rounded mt-4 border border-gray-800 text-sm font-mono">
           <code>{stack}</code>
         </pre>
       )}
