@@ -3,10 +3,11 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
-    cloudflare({ configPath: "./wrangler.toml" }), // <--- AQUI: Amarramos a configuração!
+    // Carrega o plugin do Cloudflare APENAS em desenvolvimento
+    mode === 'development' && cloudflare({ configPath: "./wrangler.toml" }),
     reactRouter(),
     tsconfigPaths(),
-  ],
-});
+  ].filter(Boolean), // Remove os itens 'false' da lista
+}));
