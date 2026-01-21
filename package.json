@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "react-router build",
-    "dev": "react-router dev",
-    "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc"
-  },
+  "build": "react-router build && rm -f build/client/wrangler.json && cp build/server/index.js build/client/_worker.js",
+  "dev": "react-router dev",
+  "start": "react-router-serve ./build/server/index.js",
+  "typecheck": "react-router typegen && tsc"
+},
   "dependencies": {
     "@react-router/cloudflare": "^7.12.0",
     "clsx": "^2.1.1",
