@@ -1,87 +1,68 @@
-# Welcome to React Router!
+# Financial Hub
 
-A modern, production-ready template for building full-stack React applications using React Router.
+Um template moderno e pronto para produção para construir aplicações React full-stack usando React Router.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## Recursos
 
-## Features
-
-- 🚀 Server-side rendering
+- 🚀 Renderização no lado do servidor (SSR)
 - ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+- 📦 Empacotamento e otimização de assets
+- 🔄 Carregamento de dados e mutações
+- 🔒 TypeScript por padrão
+- 🎉 TailwindCSS para estilização
+- ☁️ Integração com Cloudflare Workers
+- 📖 [Documentação do React Router](https://reactrouter.com/)
 
-## Getting Started
+## Primeiros Passos
 
-### Installation
+### Instalação
 
-Install the dependencies:
+Instale as dependências:
 
 ```bash
 npm install
-```
+Desenvolvimento
+Temos dois modos de desenvolvimento disponíveis, dependendo da sua necessidade:
 
-### Development
+1. Modo Padrão (Recomendado para UI/Lógica)
+Executa o servidor de desenvolvimento padrão do React Router (Node.js). Use este modo para a maior parte do desenvolvimento diário (layouts, componentes, rotas padrão), pois é mais rápido e evita conflitos de ambiente.
 
-Start the development server with HMR:
+Bash
 
-```bash
 npm run dev
-```
+Acesse em: http://localhost:5173
 
-Your application will be available at `http://localhost:5173`.
+2. Modo de Integração Cloudflare
+Executa o servidor de desenvolvimento com o Proxy do Cloudflare ativado. Use este modo apenas quando precisar testar recursos específicos do Cloudflare localmente (Bindings, KV, D1, Headers).
 
-## Building for Production
+Bash
 
-Create a production build:
+npm run dev:cf
+Nota: Requer a configuração do cross-env no package.json.
 
-```bash
+Build para Produção
+Crie uma build de produção:
+
+Bash
+
 npm run build
-```
+Deploy
+Deploy na Cloudflare
+Faça o deploy para o Cloudflare Workers usando o Wrangler:
 
-## Deployment
+Bash
 
-### Docker Deployment
+npx wrangler deploy
+Deploy com Docker
+Para construir e rodar usando Docker:
 
-To build and run using Docker:
+Bash
 
-```bash
-docker build -t my-app .
+docker build -t financial-hub .
 
-# Run the container
-docker run -p 3000:3000 my-app
-```
+# Rodar o contêiner
+docker run -p 3000:3000 financial-hub
+Estilização
+Este template já vem com o Tailwind CSS configurado.
 
-The containerized application can be deployed to any platform that supports Docker, including:
-
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
-```
-
-## Styling
-
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
-
----
-
-Built with ❤️ using React Router.
+Feito com ❤️ usando React Router & Cloudflare.

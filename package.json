@@ -2,9 +2,10 @@
   "name": "financial-hub",
   "private": true,
   "type": "module",
-  "scripts": {
+ "scripts": {
   "build": "react-router build && cp build/server/index.js build/client/_worker.js",
-  "dev": "react-router dev",
+  "dev": "react-router dev", 
+  "dev:cf": "cross-env USE_CF=true react-router dev", 
   "start": "react-router-serve ./build/server/index.js",
   "typecheck": "react-router typegen && tsc"
 },
@@ -31,6 +32,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.23",
+    "cross-env": "^10.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.2",

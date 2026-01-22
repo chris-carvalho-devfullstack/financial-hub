@@ -5,9 +5,11 @@ export default [
 
   layout("routes/_app.tsx", [
     index("routes/dashboard.tsx"),
-    route("veiculos", "routes/veiculos.tsx"), // <--- ADICIONE ESTA LINHA
     route("ganhos", "routes/ganhos.tsx"),
     route("despesas", "routes/despesas.tsx"),
+    route("veiculos", "routes/veiculos.tsx"),
+    // Adicione esta linha:
+    route("timeline", "routes/timeline.tsx"), 
   ]),
 
 ] satisfies RouteConfig;

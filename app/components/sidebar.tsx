@@ -1,10 +1,12 @@
+// app/components/sidebar.tsx
 import { NavLink, useNavigate } from "react-router";
 import { 
   LayoutDashboard, 
   TrendingUp, 
   TrendingDown, 
   Car, 
-  LogOut 
+  LogOut,
+  Calendar // <--- 1. Importado novo ícone
 } from "lucide-react";
 import { auth } from "~/lib/firebase.client";
 
@@ -18,6 +20,7 @@ export function Sidebar() {
 
   const menuItems = [
     { label: "Dashboard", href: "/", icon: LayoutDashboard },
+    { label: "Timeline", href: "/timeline", icon: Calendar }, // <--- 2. Item adicionado
     { label: "Ganhos", href: "/ganhos", icon: TrendingUp },
     { label: "Despesas", href: "/despesas", icon: TrendingDown },
     { label: "Veículos", href: "/veiculos", icon: Car },
