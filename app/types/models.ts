@@ -3,8 +3,9 @@
 export interface Vehicle {
   id: string;
   userId: string;
-  name: string; // Ex: "Onix Turbo", "Titan 160"
+  name: string;
   plate?: string;
+  model?: string;
   createdAt: string;
 }
 
@@ -15,31 +16,32 @@ export interface BaseTransaction {
   userId: string;
   vehicleId: string;
   type: TransactionType;
-  amount: number; // Em centavos (R$ 10,00 = 1000)
-  date: string;   // ISO String (YYYY-MM-DD...)
+  amount: number; // Em centavos
+  date: string;   // ISO String
   description?: string;
   createdAt: string;
 }
 
 export interface IncomeTransaction extends BaseTransaction {
   type: 'INCOME';
-  platform: string; // Uber, 99, Indrive, Particular
-  distanceDriven: number; // KM rodados no dia/corrida
-  onlineDurationMinutes: number; // <--- NOVO: Tempo trabalhado em minutos
-  tripsCount?: number; // Quantidade de viagens
+  platform: string;
+  distanceDriven: number;
+  onlineDurationMinutes: number;
+  tripsCount?: number;
+  clusterKmPerLiter?: number; // <--- NOVO: Média informada pelo painel (Ex: 12.5 km/l)
 }
 
 export interface ExpenseTransaction extends BaseTransaction {
   type: 'EXPENSE';
-  category: string; // Combustível, Manutenção, Seguro, IPVA...
+  category: string;
 }
 
 export interface FuelTransaction extends ExpenseTransaction {
-  category: 'Combustível'; // Força a categoria
+  category: 'Combustível';
   liters: number;
-  pricePerLiter: number;
-  odometer: number; // KM atual do carro
-  fuelType: string; // Gasolina, Etanol, GNV
+  pricePerLiter: number; // Preço do litro
+  odometer: number;
+  fuelType: string;
   stationName?: string;
   fullTank: boolean;
 }
