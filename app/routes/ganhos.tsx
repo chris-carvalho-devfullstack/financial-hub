@@ -1,5 +1,9 @@
+// app/routes/ganhos.tsx
+
 import { useEffect, useState } from "react";
-import { collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit } from "firebase/firestore";
+import { 
+  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc 
+} from "firebase/firestore"; // <--- ADICIONADO: updateDoc
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
@@ -74,7 +78,7 @@ export default function GanhosPage() {
   const [distance, setDistance] = useState("");
   const [hours, setHours] = useState("");
   const [trips, setTrips] = useState("");
-  const [clusterAvg, setClusterAvg] = useState(""); // <--- NOVO: Média do Painel
+  const [clusterAvg, setClusterAvg] = useState(""); 
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
@@ -113,7 +117,17 @@ export default function GanhosPage() {
       const amountCents = Math.round(parseFloat(amount.replace(',', '.')) * 100);
       const hoursNum = parseFloat(hours.replace(',', '.')) || 0;
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
+      const drivenKm = Number(distance) || 0;
+
+      // === LÓGICA DE ODÔMETRO INTELIGENTE ===
+      // 1. Encontra o veículo selecionado
+      const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
+      const currentOdometer = currentVehicle?.currentOdometer || 0;
       
+      // 2. Calcula o novo odômetro (Base anterior + Viagem do dia)
+      const finalOdometer = currentOdometer + drivenKm;
+
+      // 3. Salva a transação com o odômetro calculado
       await addDoc(collection(db, "transactions"), {
         userId: auth.currentUser.uid,
         vehicleId: selectedVehicle,
@@ -121,18 +135,27 @@ export default function GanhosPage() {
         platform: selectedPlatform,
         amount: amountCents,
         date: new Date(date).toISOString(),
-        distanceDriven: Number(distance) || 0,
+        distanceDriven: drivenKm,
         onlineDurationMinutes: Math.round(hoursNum * 60),
         tripsCount: Number(trips) || 0,
-        clusterKmPerLiter: avgNum, // <--- SALVANDO
+        clusterKmPerLiter: avgNum,
+        odometer: finalOdometer, // <--- CAMPO IMPORTANTE
         createdAt: new Date().toISOString()
       });
+
+      // 4. Atualiza o veículo (Se houve movimentação)
+      if (drivenKm > 0) {
+         const vehicleRef = doc(db, "vehicles", selectedVehicle);
+         await updateDoc(vehicleRef, {
+            currentOdometer: finalOdometer
+         });
+      }
 
       setAmount("");
       setDistance("");
       setHours("");
       setTrips("");
-      setClusterAvg(""); // Reset
+      setClusterAvg(""); 
       setSaving(false);
     } catch (error) {
       console.error(error);
@@ -285,7 +308,7 @@ export default function GanhosPage() {
           </form>
         </div>
 
-        {/* COLUNA DIREITA: HISTÓRICO (Mantida, com adição da info de média) */}
+        {/* COLUNA DIREITA: HISTÓRICO */}
         <div className="flex-1 w-full md:border-l md:border-gray-800 md:pl-8">
            <div className="mt-8 md:mt-[112px]">
               <div className="flex items-center justify-between mb-4">

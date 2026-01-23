@@ -1,15 +1,19 @@
-import { useEffect, useState, useMemo } from "react";
+// app/routes/dashboard.tsx
+
+import { useEffect, useState } from "react";
 import { collection, query, where, onSnapshot, orderBy, limit, getDocs } from "firebase/firestore";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, AlertTriangle, Car, Gauge, Fuel, Trophy, Target
+  Calendar, Clock, Zap, Car, Gauge, Fuel, Trophy, Target
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import type { Transaction, IncomeTransaction, FuelTransaction, ExpenseTransaction } from "~/types/models";
-import { ExpenseCategory, Platform } from "~/types/enums";
+import { ExpenseCategory } from "~/types/enums";
+// 👇 IMPORTANTE: Importando o gráfico que criamos
+import { OdometerChart } from "~/components/OdometerChart"; 
 
 // Tipos
 type TimeFilter = 'DAY' | 'WEEK' | 'MONTH';
@@ -221,10 +225,8 @@ export default function Dashboard() {
     // Média Diária (Bruta)
     let daysCount = 1;
     if (timeFilter === 'WEEK') daysCount = 7;
-    if (timeFilter === 'MONTH') daysCount = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate(); // Dias no mês
-    // Se for 'DAY', daysCount é 1.
-    // Para ser mais preciso no "até agora", poderíamos usar dias transcorridos, mas para média de meta vamos usar o período total ou dias com trabalho.
-    // Vamos usar: Dias com registro de trabalho (mais real)
+    if (timeFilter === 'MONTH') daysCount = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate(); 
+    
     const activeDays = dailyMap.size || 1;
     const avgDailyIncome = income / activeDays;
 
@@ -254,7 +256,7 @@ export default function Dashboard() {
     setMetrics({
       income, expense, profit, km, hours,
       profitPerHour, profitPerKm, costPerKm,
-      grossPerHour, grossPerKm, avgDailyIncome, // Novos
+      grossPerHour, grossPerKm, avgDailyIncome, 
       clusterAvg, realAvg, bestApp
     });
 
@@ -306,16 +308,10 @@ export default function Dashboard() {
             <Target size={16} className="text-purple-500"/> Produtividade Bruta
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-           {/* Faturamento por Hora */}
            <SmartCard title="Ganho/Hora" value={formatMoney(metrics.grossPerHour)} subtitle="Faturamento Bruto" icon={Clock} color="indigo" />
-           
-           {/* Faturamento por KM */}
            <SmartCard title="Ganho/KM" value={formatMoney(metrics.grossPerKm)} subtitle="Faturamento Bruto" icon={MapPin} color="violet" />
-           
-           {/* Média Diária */}
            <SmartCard title="Média Diária" value={formatMoney(metrics.avgDailyIncome)} subtitle="Dias trabalhados" icon={Calendar} color="pink" />
            
-           {/* Melhor App */}
            <div className="bg-gray-900 p-5 rounded-2xl border border-gray-800 shadow-lg relative overflow-hidden group hover:border-gray-700 transition-all">
               <div className="absolute -right-6 -top-6 p-8 opacity-[0.03] bg-yellow-500 rounded-full blur-2xl"></div>
               <div className="flex justify-between items-start mb-3">
@@ -370,7 +366,7 @@ export default function Dashboard() {
          </div>
       </div>
 
-      {/* === GRÁFICO === */}
+      {/* === GRÁFICO DE BARRAS (DIÁRIO) === */}
       <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 h-96 shadow-lg">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-bold text-white">Desempenho Diário</h3>
@@ -402,6 +398,12 @@ export default function Dashboard() {
           </ResponsiveContainer>
         )}
       </div>
+
+      {/* === NOVO: GRÁFICO DE ODÔMETRO (AQUI ESTÁ!) === */}
+      <div className="pt-4">
+         <OdometerChart transactions={transactions} />
+      </div>
+
     </div>
   );
 }

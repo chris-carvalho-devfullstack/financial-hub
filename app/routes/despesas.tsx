@@ -1,11 +1,12 @@
+// app/routes/despesas.tsx
 import { useEffect, useState } from "react";
 import { collection, addDoc, query, where, orderBy, limit, onSnapshot, updateDoc, doc, deleteDoc } from "firebase/firestore";
-import { Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, X, CheckCircle, AlertTriangle } from "lucide-react";
+import { Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, AlertTriangle } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { ExpenseCategory, FuelType } from "~/types/enums";
 import type { Vehicle } from "~/types/models";
 
-// === COMPONENTES DE MODAL (Internos) ===
+// === COMPONENTES DE MODAL ===
 
 function SuccessModal({ isOpen, onClose, title, message }: any) {
   if (!isOpen) return null;
@@ -64,21 +65,21 @@ export default function DespesasPage() {
 
   // Estados de Modal
   const [showSuccess, setShowSuccess] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null); // Se tiver ID, mostra modal de deletar
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Estados Comuns
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [amount, setAmount] = useState(""); 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState("");
+  const [odometer, setOdometer] = useState(""); // AGORA USADO EM AMBAS AS ABAS
 
   // Estados Específicos de Combustível
   const [fuelType, setFuelType] = useState<FuelType>(FuelType.GASOLINE);
   const [liters, setLiters] = useState("");
   const [pricePerLiter, setPricePerLiter] = useState("");
-  const [odometer, setOdometer] = useState("");
   const [fullTank, setFullTank] = useState(true);
-  const [stationName, setStationName] = useState(""); // Novo campo: Posto
+  const [stationName, setStationName] = useState(""); 
 
   // Estados Específicos Gerais
   const [category, setCategory] = useState<ExpenseCategory>(ExpenseCategory.MAINTENANCE);
@@ -94,7 +95,8 @@ export default function DespesasPage() {
       setVehicles(data);
       if (data.length > 0 && !selectedVehicle) {
         setSelectedVehicle(data[0].id);
-        setOdometer(String(data[0].currentOdometer)); 
+        // Preenche o odômetro inicial
+        if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer)); 
       }
     });
 
@@ -115,10 +117,10 @@ export default function DespesasPage() {
     return () => { unsubVehicles(); unsubExpenses(); };
   }, []);
 
-  // Atualizar odômetro ao trocar de carro
+  // Atualizar odômetro no input ao trocar de carro (se o usuário ainda não digitou nada)
   useEffect(() => {
     const vehicle = vehicles.find(v => v.id === selectedVehicle);
-    if (vehicle) setOdometer(String(vehicle.currentOdometer));
+    if (vehicle) setOdometer(String(vehicle.currentOdometer || ""));
   }, [selectedVehicle, vehicles]);
 
   // === CÁLCULOS ===
@@ -144,6 +146,7 @@ export default function DespesasPage() {
     try {
       const safeAmount = amount.replace(',', '.');
       const amountInCents = Math.round(parseFloat(safeAmount) * 100);
+      const currentOdometerValue = Number(odometer);
       
       const baseData = {
         userId: auth.currentUser.uid,
@@ -152,6 +155,7 @@ export default function DespesasPage() {
         amount: amountInCents,
         date: new Date(date).toISOString(),
         description: activeTab === 'FUEL' ? 'Abastecimento' : description,
+        odometer: currentOdometerValue > 0 ? currentOdometerValue : null, // Salva ODÔMETRO em ambos
         createdAt: new Date().toISOString()
       };
 
@@ -162,32 +166,40 @@ export default function DespesasPage() {
           fuelType,
           liters: Number(liters),
           pricePerLiter: Number(pricePerLiter),
-          odometer: Number(odometer),
           fullTank,
-          stationName: stationName || "Posto não informado" // Salva o posto
+          stationName: stationName || "Posto não informado"
         });
-
-        // Atualizar KM do carro
-        const currentCar = vehicles.find(v => v.id === selectedVehicle);
-        if (currentCar && Number(odometer) > currentCar.currentOdometer) {
-          await updateDoc(doc(db, "vehicles", selectedVehicle), { currentOdometer: Number(odometer) });
-        }
       } else {
-        await addDoc(collection(db, "transactions"), { ...baseData, category, isFixedCost: false });
+        await addDoc(collection(db, "transactions"), { 
+            ...baseData, 
+            category, 
+            isFixedCost: false 
+        });
+      }
+
+      // === ATUALIZAÇÃO DO VEÍCULO (INTELIGENTE) ===
+      // Funciona tanto para Abastecimento quanto para Manutenção
+      const currentCar = vehicles.find(v => v.id === selectedVehicle);
+      if (currentCar && currentOdometerValue > (currentCar.currentOdometer || 0)) {
+        await updateDoc(doc(db, "vehicles", selectedVehicle), { 
+            currentOdometer: currentOdometerValue,
+            updatedAt: new Date().toISOString()
+        });
       }
 
       setSaving(false);
-      setShowSuccess(true); // Exibir Modal de Sucesso
+      setShowSuccess(true); 
       
       // Limpar campos
       setAmount("");
       setLiters("");
       setStationName("");
       setDescription("");
+      // Não limpamos o odômetro pois ele deve persistir/avançar
 
     } catch (error) {
       console.error(error);
-      alert("Erro técnico ao salvar."); // Fallback simples para erro de sistema
+      alert("Erro técnico ao salvar.");
       setSaving(false);
     }
   };
@@ -212,7 +224,7 @@ export default function DespesasPage() {
         isOpen={showSuccess} 
         onClose={() => setShowSuccess(false)} 
         title="Salvo com Sucesso!" 
-        message="A despesa foi registrada e seu histórico atualizado."
+        message="A despesa foi registrada e a quilometragem do veículo atualizada."
       />
       
       <ConfirmModal 
@@ -275,7 +287,6 @@ export default function DespesasPage() {
                       {/* === ABASTECIMENTO === */}
                       <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-4">
                         
-                        {/* NOVO CAMPO: POSTO */}
                         <div>
                           <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
                             <MapPin size={12} className="text-emerald-500"/> Posto de Combustível
@@ -322,16 +333,17 @@ export default function DespesasPage() {
                         </div>
                       </div>
 
+                      {/* Odômetro na aba Fuel */}
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (KM Total)</label>
                         <input type="number" required value={odometer} onChange={e => setOdometer(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg"/>
                       </div>
 
                       <div className="flex items-center gap-3 py-2 bg-gray-800/30 p-2 rounded-lg cursor-pointer" onClick={() => setFullTank(!fullTank)}>
-                         <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${fullTank ? 'bg-emerald-500 border-emerald-500' : 'border-gray-600'}`}>
-                            {fullTank && <CheckCircle size={14} className="text-white" />}
-                         </div>
-                         <label className="text-sm text-gray-300 cursor-pointer select-none">Encheu o tanque? (Resetar média)</label>
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${fullTank ? 'bg-emerald-500 border-emerald-500' : 'border-gray-600'}`}>
+                             {fullTank && <CheckCircle size={14} className="text-white" />}
+                          </div>
+                          <label className="text-sm text-gray-300 cursor-pointer select-none">Encheu o tanque? (Resetar média)</label>
                       </div>
                     </>
                   ) : (
@@ -355,8 +367,21 @@ export default function DespesasPage() {
                       </div>
 
                       <div>
-                         <label className="block text-xs text-emerald-500 mb-1 font-bold">Valor (R$)</label>
-                         <input type="number" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none"/>
+                          <label className="block text-xs text-emerald-500 mb-1 font-bold">Valor (R$)</label>
+                          <input type="number" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none"/>
+                      </div>
+
+                      {/* NOVO: Odômetro na aba Geral (Opcional, mas recomendado para manutenção) */}
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Odômetro (Opcional)</label>
+                        <input 
+                            type="number" 
+                            value={odometer} 
+                            onChange={e => setOdometer(e.target.value)} 
+                            placeholder="KM no momento do serviço"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600"
+                        />
+                        <p className="text-[10px] text-gray-500 mt-1">Informe se deseja atualizar a KM do veículo.</p>
                       </div>
                     </>
                   )}
@@ -409,14 +434,14 @@ export default function DespesasPage() {
                     <span className="text-xs text-gray-500 flex items-center gap-1 justify-end">
                       <Calendar size={12}/> {new Date(exp.date).toLocaleDateString('pt-BR')}
                     </span>
-                    {exp.category === 'FUEL' && (
+                    {/* Exibe o Odômetro para QUALQUER despesa que tenha o dado */}
+                    {exp.odometer && (
                         <span className="text-xs text-emerald-500/70 block mt-1 font-mono">
-                            {exp.odometer} km
+                           {exp.odometer} km
                         </span>
                     )}
                   </div>
                   
-                  {/* BOTÃO DE DELETAR */}
                   <button 
                     onClick={() => setDeleteId(exp.id)}
                     className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-100 sm:opacity-0 group-hover:opacity-100"

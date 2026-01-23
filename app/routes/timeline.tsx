@@ -92,7 +92,6 @@ export default function TimelinePage() {
   }, [selectedVehicleId]);
 
   // 3. Otimização de Performance (useMemo)
-  // O app só recalcula isso se 'transactions' ou 'filterType' mudar.
   const groupedTransactions = useMemo(() => {
     const filtered = transactions.filter(t => {
       if (filterType === 'ALL') return true;
@@ -265,7 +264,6 @@ export default function TimelinePage() {
                                       {isFuel ? 'Abastecimento' : isIncome ? 'Receita da Corrida' : (t.description || 'Despesa')}
                                     </h3>
                                     <p className="text-xs text-gray-400 flex items-center gap-2 mt-1">
-                                      {/* Data visível só no desktop pois no mobile já está na lateral */}
                                       <span className="hidden md:inline bg-gray-900/50 px-2 py-0.5 rounded text-gray-500 font-mono">
                                         {formatDate(t.date)}
                                       </span>
@@ -280,18 +278,27 @@ export default function TimelinePage() {
                                   <span className={`text-xl font-bold whitespace-nowrap ${isIncome ? 'text-emerald-400' : 'text-white'}`}>
                                     {isIncome ? '+' : '-'}{formatMoney(t.amount)}
                                   </span>
-                                  {isFuel && fuelData?.odometer && (
-                                     <div className="text-[10px] text-gray-500 font-mono mt-1 bg-black/30 px-2 py-0.5 rounded inline-block">
-                                        KM {fuelData.odometer}
-                                     </div>
-                                  )}
                                 </div>
                               </div>
 
-                              {(isFuel || isIncome) && (
-                                <div className="mt-4 pt-3 border-t border-gray-700/30 flex flex-wrap gap-2 text-sm text-gray-300">
+                              <div className="mt-4 pt-3 border-t border-gray-700/30 flex flex-wrap gap-2 text-sm text-gray-300 items-center">
+                                   
+                                   {/* === BADGE DE ODÔMETRO (Universal) === */}
+                                   {/* Aparece em qualquer transação que tenha odometer gravado */}
+                                   {t.odometer && t.odometer > 0 && (
+                                     <div className="flex items-center gap-1.5 bg-gray-950/50 border border-gray-700/50 px-2.5 py-1 rounded-md shadow-sm">
+                                        <span className="text-gray-500 text-xs uppercase font-bold tracking-wider">ODO</span>
+                                        <span className="font-mono text-white font-bold tracking-wide">
+                                           {t.odometer.toLocaleString('pt-BR')} km
+                                        </span>
+                                     </div>
+                                   )}
+
                                    {isFuel && fuelData && (
                                      <>
+                                       {/* Divisor Visual se tiver ODO e Litros */}
+                                       {t.odometer && <div className="w-px h-4 bg-gray-700/50 mx-1 hidden sm:block"></div>}
+                                       
                                        <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
                                          <Fuel size={14} className="text-yellow-500"/>
                                          <span className="font-bold">{fuelData.liters}L</span>
@@ -302,19 +309,24 @@ export default function TimelinePage() {
                                        )}
                                      </>
                                    )}
+
                                    {isIncome && (t as IncomeTransaction).distanceDriven > 0 && (
-                                     <div className="flex items-center gap-2 w-full sm:w-auto">
-                                       <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
-                                          <Car size={14} className="text-blue-400" /> 
-                                          <span>{(t as IncomeTransaction).distanceDriven} km</span>
+                                     <>
+                                       {t.odometer && <div className="w-px h-4 bg-gray-700/50 mx-1 hidden sm:block"></div>}
+                                       
+                                       <div className="flex items-center gap-2 w-full sm:w-auto">
+                                         <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
+                                            <Car size={14} className="text-blue-400" /> 
+                                            <span>{(t as IncomeTransaction).distanceDriven} km (Trip)</span>
+                                         </div>
+                                         <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
+                                            <span className="text-emerald-400 font-bold">R$ {((t.amount / 100) / (t as IncomeTransaction).distanceDriven).toFixed(2)}/km</span>
+                                         </div>
                                        </div>
-                                       <div className="flex items-center gap-1 bg-black/20 px-2 py-1 rounded">
-                                          <span className="text-emerald-400 font-bold">R$ {((t.amount / 100) / (t as IncomeTransaction).distanceDriven).toFixed(2)}/km</span>
-                                       </div>
-                                     </div>
+                                     </>
                                    )}
-                                </div>
-                              )}
+                              </div>
+
                            </div>
                         </div>
                       </div>

@@ -7,6 +7,7 @@ export interface Vehicle {
   plate?: string;
   model?: string;
   createdAt: string;
+  currentOdometer?: number; // <--- NOVO: O KM atual do carro (snapshot)
 }
 
 export type TransactionType = 'INCOME' | 'EXPENSE';
@@ -20,6 +21,7 @@ export interface BaseTransaction {
   date: string;   // ISO String
   description?: string;
   createdAt: string;
+  odometer?: number; // <--- NOVO: O KM do painel no momento do registro (Histórico)
 }
 
 export interface IncomeTransaction extends BaseTransaction {
@@ -28,7 +30,7 @@ export interface IncomeTransaction extends BaseTransaction {
   distanceDriven: number;
   onlineDurationMinutes: number;
   tripsCount?: number;
-  clusterKmPerLiter?: number; // <--- NOVO: Média informada pelo painel (Ex: 12.5 km/l)
+  clusterKmPerLiter?: number; 
 }
 
 export interface ExpenseTransaction extends BaseTransaction {
@@ -39,8 +41,8 @@ export interface ExpenseTransaction extends BaseTransaction {
 export interface FuelTransaction extends ExpenseTransaction {
   category: 'Combustível';
   liters: number;
-  pricePerLiter: number; // Preço do litro
-  odometer: number;
+  pricePerLiter: number; 
+  odometer: number; // Em abastecimentos, continua obrigatório (e sobrescreve o opcional da base)
   fuelType: string;
   stationName?: string;
   fullTank: boolean;
