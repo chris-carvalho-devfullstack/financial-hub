@@ -7,12 +7,11 @@ import {
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, Car, Gauge, Fuel, Trophy, Target
+  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import type { Transaction, IncomeTransaction, FuelTransaction, ExpenseTransaction } from "~/types/models";
 import { ExpenseCategory } from "~/types/enums";
-// 👇 IMPORTANTE: Importando o gráfico que criamos
 import { OdometerChart } from "~/components/OdometerChart"; 
 
 // Tipos
@@ -104,7 +103,9 @@ export default function Dashboard() {
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
     // Líquidos (Eficiência)
-    profitPerHour: 0, profitPerKm: 0, costPerKm: 0,
+    profitPerHour: 0, profitPerKm: 0, 
+    fuelCostPerKm: 0,        // <--- Novo: Apenas Gasolina (Estimado)
+    maintenanceCostPerKm: 0, // <--- Novo: Manutenção/Outros (Real)
     // Brutos (Produtividade)
     grossPerHour: 0, grossPerKm: 0, avgDailyIncome: 0,
     // Médias e Apps
@@ -126,19 +127,24 @@ export default function Dashboard() {
   useEffect(() => {
     if (!auth.currentUser) return;
     const fetchLastFuel = async () => {
+      // Busca extendida para garantir que achamos o último abastecimento
       const q = query(
         collection(db, "transactions"),
         where("userId", "==", auth.currentUser?.uid),
         where("type", "==", "EXPENSE"),
         orderBy("date", "desc"),
-        limit(20)
+        limit(100) 
       );
       const snap = await getDocs(q);
+      
+      // Procura transação que seja Combustível (pelo Enum ou String)
       const fuelTrans = snap.docs
         .map(d => d.data() as ExpenseTransaction)
-        .find(t => t.category === ExpenseCategory.FUEL) as FuelTransaction | undefined;
+        .find(t => t.category === ExpenseCategory.FUEL || t.category === 'Combustível') as FuelTransaction | undefined;
       
-      if (fuelTrans && fuelTrans.pricePerLiter) setLastFuelPrice(fuelTrans.pricePerLiter);
+      if (fuelTrans && fuelTrans.pricePerLiter) {
+        setLastFuelPrice(fuelTrans.pricePerLiter);
+      }
     };
     fetchLastFuel();
   }, []);
@@ -175,6 +181,9 @@ export default function Dashboard() {
     let sumClusterAvg = 0;
     let countClusterEntries = 0;
     
+    // Variável para somar APENAS despesas que NÃO são combustível (Manutenção, Lanche, etc)
+    let maintenanceExpenses = 0; 
+    
     const platformIncome: Record<string, number> = {};
     const dailyMap = new Map();
 
@@ -190,7 +199,6 @@ export default function Dashboard() {
         income += val;
         dayData.income += val;
         
-        // Dados para Best App
         const inc = t as IncomeTransaction;
         platformIncome[inc.platform] = (platformIncome[inc.platform] || 0) + val;
 
@@ -201,61 +209,73 @@ export default function Dashboard() {
           countClusterEntries++;
         }
       } else {
-        expense += val;
+        // É Despesa
+        expense += val; // Total geral (Caixa)
         dayData.expense += val;
+        
         const exp = t as ExpenseTransaction;
-        if (exp.category === ExpenseCategory.FUEL) {
+        
+        // Verifica se é combustível
+        const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'Combustível';
+        
+        if (isFuel) {
            const fuel = t as FuelTransaction;
            if (fuel.liters) totalLitersRefueled += fuel.liters;
+        } else {
+           // Se não for combustível, entra na conta de manutenção/custos diversos
+           maintenanceExpenses += val;
         }
       }
     });
 
-    const profit = income - expense;
+    // Fluxo de Caixa Real
+    const profit = income - expense; 
     const hours = minutes / 60;
     
-    // Médias Gerais
+    // Médias
     const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0;
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
-    // === CÁLCULOS BRUTOS (PRODUTIVIDADE) ===
+    // Produtividade (Bruto)
     const grossPerHour = hours > 0 ? income / hours : 0;
     const grossPerKm = km > 0 ? income / km : 0;
-    
-    // Média Diária (Bruta)
-    let daysCount = 1;
-    if (timeFilter === 'WEEK') daysCount = 7;
-    if (timeFilter === 'MONTH') daysCount = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate(); 
-    
     const activeDays = dailyMap.size || 1;
     const avgDailyIncome = income / activeDays;
 
-    // === BEST APP ===
+    // === CÁLCULO DE CUSTOS SEPARADOS ===
+
+    // 1. Custo de Combustível/KM (Estimado/Teórico)
+    // Fórmula: Preço da Bomba / Eficiência do Painel (ou Real se não tiver painel)
+    let fuelCostPerKm = 0;
+    const efficiency = clusterAvg > 0 ? clusterAvg : (realAvg > 0 ? realAvg : 0);
+    
+    if (efficiency > 0 && lastFuelPrice > 0) {
+      fuelCostPerKm = lastFuelPrice / efficiency;
+    }
+
+    // 2. Custo de Manutenção/KM (Real)
+    // Fórmula: Total Gasto em Manutenção no período / KM Rodado
+    const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
+
+    // 3. Lucro Operacional Real (Econômico)
+    // Lucro = Faturamento - (Custo Gasolina Estimado + Custo Manutenção Real)
+    // Isso evita distorções quando você abastece tanque cheio num dia só.
+    const totalOperationalCost = (fuelCostPerKm * km) + maintenanceExpenses;
+    const realProfit = income - totalOperationalCost;
+
+    const profitPerHour = hours > 0 ? (realProfit / hours) : 0;
+    const profitPerKm = km > 0 ? (realProfit / km) : 0;
+
+    // Best App
     let bestApp = { name: '-', amount: 0 };
     Object.entries(platformIncome).forEach(([name, amount]) => {
       if (amount > bestApp.amount) bestApp = { name, amount };
     });
 
-    // === CUSTO POR KM (LÓGICA HÍBRIDA) ===
-    let costPerKm = 0;
-    if (timeFilter === 'DAY' && clusterAvg > 0 && lastFuelPrice > 0 && km > 0) {
-      const price = lastFuelPrice;
-      const fuelCost = (km / clusterAvg) * price;
-      // Custo KM = (Gasolina Estimada + Outras Despesas) / KM
-      costPerKm = (fuelCost + (expense > 0 ? expense : 0)) / km;
-      // Ajuste fino: Se não teve despesa, é só o custo da gasolina
-      if (expense === 0) costPerKm = price / clusterAvg;
-    } else {
-      costPerKm = km > 0 ? (expense / km) : 0;
-    }
-
-    // Líquidos
-    const profitPerHour = hours > 0 ? (profit / hours) : 0;
-    const profitPerKm = km > 0 ? (profit / km) : 0;
-
     setMetrics({
       income, expense, profit, km, hours,
-      profitPerHour, profitPerKm, costPerKm,
+      profitPerHour, profitPerKm, 
+      fuelCostPerKm, maintenanceCostPerKm,
       grossPerHour, grossPerKm, avgDailyIncome, 
       clusterAvg, realAvg, bestApp
     });
@@ -295,14 +315,14 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* === LINHA 1: FINANCEIRO GERAL === */}
+      {/* === LINHA 1: FINANCEIRO GERAL (CAIXA) === */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SmartCard title="Lucro Líquido (Real)" value={formatMoney(metrics.profit)} subtitle={metrics.profit >= 0 ? "O que sobrou no bolso" : "Prejuízo no período"} icon={Wallet} color={metrics.profit >= 0 ? "emerald" : "red"} highlight={true} />
+        <SmartCard title="Lucro Líquido (Caixa)" value={formatMoney(metrics.profit)} subtitle={metrics.profit >= 0 ? "Fluxo de caixa real" : "Prejuízo no caixa"} icon={Wallet} color={metrics.profit >= 0 ? "emerald" : "red"} highlight={true} />
         <SmartCard title="Faturamento Total" value={formatMoney(metrics.income)} subtitle="Soma de todos os apps" icon={TrendingUp} color="blue" />
-        <SmartCard title="Despesas Totais" value={formatMoney(metrics.expense)} subtitle="Gastos registrados" icon={TrendingDown} color="red" />
+        <SmartCard title="Despesas Totais" value={formatMoney(metrics.expense)} subtitle="Todas saídas (Comb + Outros)" icon={TrendingDown} color="red" />
       </div>
 
-      {/* === LINHA 2: PRODUTIVIDADE & RENTABILIDADE (NOVO) === */}
+      {/* === LINHA 2: PRODUTIVIDADE (BRUTO) === */}
       <div className="space-y-3">
         <h2 className="text-white font-bold text-sm flex items-center gap-2 uppercase tracking-wide opacity-80">
             <Target size={16} className="text-purple-500"/> Produtividade Bruta
@@ -331,16 +351,34 @@ export default function Dashboard() {
         </h2>
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <SmartCard title="Lucro Real/Hora" value={formatMoney(metrics.profitPerHour)} subtitle="Líquido descontando custos" icon={Clock} color="emerald" />
-          <SmartCard title="Lucro Real/KM" value={formatMoney(metrics.profitPerKm)} subtitle="O que sobra por km" icon={MapPin} color="teal" />
           <SmartCard 
-            title="Custo/KM" 
-            value={formatMoney(metrics.costPerKm)} 
-            subtitle={timeFilter === 'DAY' && metrics.clusterAvg > 0 ? `Ref. Painel: ${metrics.clusterAvg}km/l` : 'Ref. Despesas Reais'} 
-            icon={AlertCircle} 
+            title="Lucro Real/Hora" 
+            value={formatMoney(metrics.profitPerHour)} 
+            subtitle="Já descontando custos" 
+            icon={Clock} 
+            color="emerald" 
+          />
+          <SmartCard 
+            title="Lucro Real/KM" 
+            value={formatMoney(metrics.profitPerKm)} 
+            subtitle={`Em ${metrics.km} km rodados`} 
+            icon={MapPin} 
+            color="teal" 
+          />
+          <SmartCard 
+            title="Custo Comb./KM" 
+            value={formatMoney(metrics.fuelCostPerKm)} 
+            subtitle={metrics.fuelCostPerKm > 0 ? `Base: ${metrics.clusterAvg > 0 ? metrics.clusterAvg.toFixed(1) : metrics.realAvg.toFixed(1)} km/l` : 'Falta dados (Abasteça)'} 
+            icon={Fuel} 
             color="orange" 
           />
-          <SmartCard title="Rodagem Total" value={`${metrics.km} km`} subtitle={`${metrics.hours.toFixed(1)}h online`} icon={Car} color="blue" />
+          <SmartCard 
+            title="Custo Manut./KM" 
+            value={formatMoney(metrics.maintenanceCostPerKm)} 
+            subtitle="Outras despesas" 
+            icon={Wrench} 
+            color="red" 
+          />
         </div>
       </div>
 
@@ -369,7 +407,7 @@ export default function Dashboard() {
       {/* === GRÁFICO DE BARRAS (DIÁRIO) === */}
       <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 h-96 shadow-lg">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-bold text-white">Desempenho Diário</h3>
+          <h3 className="text-lg font-bold text-white">Desempenho Diário (Fluxo de Caixa)</h3>
           <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">{transactions.length} regs</span>
         </div>
         
@@ -399,7 +437,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* === NOVO: GRÁFICO DE ODÔMETRO (AQUI ESTÁ!) === */}
+      {/* === NOVO: GRÁFICO DE ODÔMETRO (Evolução do KM) === */}
       <div className="pt-4">
          <OdometerChart transactions={transactions} />
       </div>
