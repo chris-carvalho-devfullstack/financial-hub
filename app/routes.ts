@@ -1,3 +1,4 @@
+// app/routes.ts
 import { type RouteConfig, index, route, layout } from "@react-router/dev/routes";
 
 export default [
@@ -8,9 +9,15 @@ export default [
     route("ganhos", "routes/ganhos.tsx"),
     route("despesas", "routes/despesas.tsx"),
     route("veiculos", "routes/veiculos.tsx"),
-    // Adicione esta linha:
     route("timeline", "routes/timeline.tsx"),
-    route("metas", "routes/metas.tsx"), 
+    route("metas", "routes/metas.tsx"),
+    
+    // === ROTAS DE PERFIL ===
+    route("perfil", "routes/perfil.tsx"), // Página principal do perfil
+    route("perfil/dados", "routes/perfil.dados.tsx"), // Editar dados
+    route("perfil/senha", "routes/perfil.senha.tsx"), // Alterar senha
+    route("perfil/preferencias", "routes/perfil.preferencias.tsx"), // Configurações
+    route("perfil/suporte", "routes/perfil.suporte.tsx"), // Ajuda
   ]),
 
 ] satisfies RouteConfig;
