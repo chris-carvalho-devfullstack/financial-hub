@@ -6,7 +6,8 @@ import {
   TrendingDown, 
   Car, 
   LogOut,
-  Calendar // <--- 1. Importado novo ícone
+  Calendar,
+  Target // <--- 1. Importando o ícone de Meta
 } from "lucide-react";
 import { auth } from "~/lib/firebase.client";
 
@@ -20,10 +21,11 @@ export function Sidebar() {
 
   const menuItems = [
     { label: "Dashboard", href: "/", icon: LayoutDashboard },
-    { label: "Timeline", href: "/timeline", icon: Calendar }, // <--- 2. Item adicionado
+    { label: "Timeline", href: "/timeline", icon: Calendar },
     { label: "Ganhos", href: "/ganhos", icon: TrendingUp },
     { label: "Despesas", href: "/despesas", icon: TrendingDown },
     { label: "Veículos", href: "/veiculos", icon: Car },
+    { label: "Metas", href: "/metas", icon: Target }, // <--- 2. Item adicionado
   ];
 
   return (

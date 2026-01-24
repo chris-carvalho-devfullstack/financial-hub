@@ -49,3 +49,17 @@ export interface FuelTransaction extends ExpenseTransaction {
 }
 
 export type Transaction = IncomeTransaction | ExpenseTransaction | FuelTransaction;
+
+// === NOVA INTERFACE: METAS (GOALS) ===
+export interface Goal {
+  id: string;
+  userId: string;
+  title: string;        // Título (ex: "Viagem 2024")
+  description?: string; // Descrição curta
+  targetAmount: number; // Meta de ganhos (Valor Alvo)
+  currentAmount: number;// Quanto já juntou
+  purpose: string;      // Finalidade planejada
+  deadline?: string;    // Data limite (opcional)
+  createdAt: string;
+  status: 'ACTIVE' | 'COMPLETED';
+}

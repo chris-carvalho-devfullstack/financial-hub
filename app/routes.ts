@@ -9,7 +9,8 @@ export default [
     route("despesas", "routes/despesas.tsx"),
     route("veiculos", "routes/veiculos.tsx"),
     // Adicione esta linha:
-    route("timeline", "routes/timeline.tsx"), 
+    route("timeline", "routes/timeline.tsx"),
+    route("metas", "routes/metas.tsx"), 
   ]),
 
 ] satisfies RouteConfig;

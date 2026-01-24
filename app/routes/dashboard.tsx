@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench
+  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import type { Transaction, IncomeTransaction, FuelTransaction, ExpenseTransaction } from "~/types/models";
@@ -102,13 +102,19 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState({
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
-    // Líquidos (Eficiência)
+    trips: 0, // <--- Novo: Total de Corridas
+    
+    // Indicadores Operacionais
+    avgTicket: 0,    // Valor médio por corrida
+    tripsPerHour: 0, // Corridas por hora
+    
+    // Custos/Eficiência
     profitPerHour: 0, profitPerKm: 0, 
-    fuelCostPerKm: 0,        // <--- Novo: Apenas Gasolina (Estimado)
-    maintenanceCostPerKm: 0, // <--- Novo: Manutenção/Outros (Real)
-    // Brutos (Produtividade)
+    fuelCostPerKmPanel: 0,   // Baseado no Painel (Estimado)
+    fuelCostPerKmPump: 0,    // Baseado na Bomba (Histórico)
+    maintenanceCostPerKm: 0, // Outros custos
+    
     grossPerHour: 0, grossPerKm: 0, avgDailyIncome: 0,
-    // Médias e Apps
     clusterAvg: 0, realAvg: 0,
     bestApp: { name: '-', amount: 0 }
   });
@@ -127,7 +133,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (!auth.currentUser) return;
     const fetchLastFuel = async () => {
-      // Busca extendida para garantir que achamos o último abastecimento
       const q = query(
         collection(db, "transactions"),
         where("userId", "==", auth.currentUser?.uid),
@@ -137,7 +142,6 @@ export default function Dashboard() {
       );
       const snap = await getDocs(q);
       
-      // Procura transação que seja Combustível (pelo Enum ou String)
       const fuelTrans = snap.docs
         .map(d => d.data() as ExpenseTransaction)
         .find(t => t.category === ExpenseCategory.FUEL || t.category === 'Combustível') as FuelTransaction | undefined;
@@ -180,14 +184,13 @@ export default function Dashboard() {
     let totalLitersRefueled = 0;
     let sumClusterAvg = 0;
     let countClusterEntries = 0;
+    let trips = 0; // <--- Novo
     
-    // Variável para somar APENAS despesas que NÃO são combustível (Manutenção, Lanche, etc)
     let maintenanceExpenses = 0; 
     
     const platformIncome: Record<string, number> = {};
     const dailyMap = new Map();
 
-    // Loop principal
     data.forEach(t => {
       const val = t.amount / 100;
       const dateKey = new Date(t.date).getDate();
@@ -204,78 +207,82 @@ export default function Dashboard() {
 
         if (inc.distanceDriven) km += Number(inc.distanceDriven);
         if (inc.onlineDurationMinutes) minutes += Number(inc.onlineDurationMinutes);
+        if (inc.tripsCount) trips += Number(inc.tripsCount); // <--- Soma Corridas
+        
         if (inc.clusterKmPerLiter && inc.clusterKmPerLiter > 0) {
           sumClusterAvg += Number(inc.clusterKmPerLiter);
           countClusterEntries++;
         }
       } else {
-        // É Despesa
-        expense += val; // Total geral (Caixa)
+        expense += val;
         dayData.expense += val;
         
         const exp = t as ExpenseTransaction;
-        
-        // Verifica se é combustível
         const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'Combustível';
         
         if (isFuel) {
            const fuel = t as FuelTransaction;
            if (fuel.liters) totalLitersRefueled += fuel.liters;
         } else {
-           // Se não for combustível, entra na conta de manutenção/custos diversos
            maintenanceExpenses += val;
         }
       }
     });
 
-    // Fluxo de Caixa Real
     const profit = income - expense; 
     const hours = minutes / 60;
     
-    // Médias
+    // === MÉDIAS OPERACIONAIS ===
+    const avgTicket = trips > 0 ? (income / trips) : 0;
+    const tripsPerHour = hours > 0 ? (trips / hours) : 0;
+
+    // === MÉDIAS DE CONSUMO ===
     const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0;
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
-    // Produtividade (Bruto)
+    // === CUSTOS POR KM ===
+
+    // 1. Custo Combustível (Painel)
+    // Lógica: Se o painel diz que faz 10km/l e a gasolina custa R$5, o custo é R$0,50/km.
+    let fuelCostPerKmPanel = 0;
+    if (clusterAvg > 0 && lastFuelPrice > 0) {
+      fuelCostPerKmPanel = lastFuelPrice / clusterAvg;
+    }
+
+    // 2. Custo Combustível (Bomba/Real)
+    // Lógica: Usa a média real calculada na bomba.
+    let fuelCostPerKmPump = 0;
+    if (realAvg > 0 && lastFuelPrice > 0) {
+      fuelCostPerKmPump = lastFuelPrice / realAvg;
+    }
+
+    // 3. Custo Manutenção
+    const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
+
+    // === LUCRATIVIDADE REAL ===
+    // Para ser justo, se tivermos a estimativa do painel, usamos ela para o dia a dia.
+    // Se não, tentamos a da bomba.
+    const usedFuelCostPerKm = fuelCostPerKmPanel > 0 ? fuelCostPerKmPanel : fuelCostPerKmPump;
+    const totalOperationalCost = (usedFuelCostPerKm * km) + maintenanceExpenses;
+    const realProfit = income - totalOperationalCost;
+
+    const profitPerHour = hours > 0 ? (realProfit / hours) : 0;
+    const profitPerKm = km > 0 ? (realProfit / km) : 0;
     const grossPerHour = hours > 0 ? income / hours : 0;
     const grossPerKm = km > 0 ? income / km : 0;
     const activeDays = dailyMap.size || 1;
     const avgDailyIncome = income / activeDays;
 
-    // === CÁLCULO DE CUSTOS SEPARADOS ===
-
-    // 1. Custo de Combustível/KM (Estimado/Teórico)
-    // Fórmula: Preço da Bomba / Eficiência do Painel (ou Real se não tiver painel)
-    let fuelCostPerKm = 0;
-    const efficiency = clusterAvg > 0 ? clusterAvg : (realAvg > 0 ? realAvg : 0);
-    
-    if (efficiency > 0 && lastFuelPrice > 0) {
-      fuelCostPerKm = lastFuelPrice / efficiency;
-    }
-
-    // 2. Custo de Manutenção/KM (Real)
-    // Fórmula: Total Gasto em Manutenção no período / KM Rodado
-    const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
-
-    // 3. Lucro Operacional Real (Econômico)
-    // Lucro = Faturamento - (Custo Gasolina Estimado + Custo Manutenção Real)
-    // Isso evita distorções quando você abastece tanque cheio num dia só.
-    const totalOperationalCost = (fuelCostPerKm * km) + maintenanceExpenses;
-    const realProfit = income - totalOperationalCost;
-
-    const profitPerHour = hours > 0 ? (realProfit / hours) : 0;
-    const profitPerKm = km > 0 ? (realProfit / km) : 0;
-
-    // Best App
     let bestApp = { name: '-', amount: 0 };
     Object.entries(platformIncome).forEach(([name, amount]) => {
       if (amount > bestApp.amount) bestApp = { name, amount };
     });
 
     setMetrics({
-      income, expense, profit, km, hours,
+      income, expense, profit, km, hours, trips,
+      avgTicket, tripsPerHour,
       profitPerHour, profitPerKm, 
-      fuelCostPerKm, maintenanceCostPerKm,
+      fuelCostPerKmPanel, fuelCostPerKmPump, maintenanceCostPerKm,
       grossPerHour, grossPerKm, avgDailyIncome, 
       clusterAvg, realAvg, bestApp
     });
@@ -331,9 +338,7 @@ export default function Dashboard() {
            <SmartCard title="Ganho/Hora" value={formatMoney(metrics.grossPerHour)} subtitle="Faturamento Bruto" icon={Clock} color="indigo" />
            <SmartCard title="Ganho/KM" value={formatMoney(metrics.grossPerKm)} subtitle="Faturamento Bruto" icon={MapPin} color="violet" />
            <SmartCard title="Média Diária" value={formatMoney(metrics.avgDailyIncome)} subtitle="Dias trabalhados" icon={Calendar} color="pink" />
-           
            <div className="bg-gray-900 p-5 rounded-2xl border border-gray-800 shadow-lg relative overflow-hidden group hover:border-gray-700 transition-all">
-              <div className="absolute -right-6 -top-6 p-8 opacity-[0.03] bg-yellow-500 rounded-full blur-2xl"></div>
               <div className="flex justify-between items-start mb-3">
                  <div className="p-2.5 rounded-xl bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"><Trophy size={22} /></div>
               </div>
@@ -344,64 +349,75 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* === LINHA 3: EFICIÊNCIA OPERACIONAL (CUSTOS) === */}
+      {/* === LINHA 3: EFICIÊNCIA REAL (OPERACIONAL + CUSTOS) === */}
       <div className="space-y-3">
         <h2 className="text-white font-bold text-sm flex items-center gap-2 uppercase tracking-wide opacity-80">
-            <Zap size={16} className="text-yellow-500"/> Eficiência Real (Líquida)
+            <Zap size={16} className="text-yellow-500"/> Eficiência Real & Operacional
         </h2>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* NOVOS CARDS DE CORRIDAS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
           <SmartCard 
-            title="Lucro Real/Hora" 
-            value={formatMoney(metrics.profitPerHour)} 
-            subtitle="Já descontando custos" 
-            icon={Clock} 
+            title="Corridas" 
+            value={metrics.trips.toString()} 
+            subtitle="Viagens finalizadas" 
+            icon={Hash} 
+            color="cyan" 
+          />
+          <SmartCard 
+            title="Média/Corrida" 
+            value={formatMoney(metrics.avgTicket)} 
+            subtitle="Ticket Médio" 
+            icon={DollarSign} 
             color="emerald" 
           />
           <SmartCard 
-            title="Lucro Real/KM" 
-            value={formatMoney(metrics.profitPerKm)} 
-            subtitle={`Em ${metrics.km} km rodados`} 
-            icon={MapPin} 
-            color="teal" 
+            title="Corridas/Hora" 
+            value={metrics.tripsPerHour.toFixed(1)} 
+            subtitle="Ritmo de trabalho" 
+            icon={Clock} 
+            color="lime" 
           />
           <SmartCard 
-            title="Custo Comb./KM" 
-            value={formatMoney(metrics.fuelCostPerKm)} 
-            subtitle={metrics.fuelCostPerKm > 0 ? `Base: ${metrics.clusterAvg > 0 ? metrics.clusterAvg.toFixed(1) : metrics.realAvg.toFixed(1)} km/l` : 'Falta dados (Abasteça)'} 
-            icon={Fuel} 
+            title="Lucro Real/Hora" 
+            value={formatMoney(metrics.profitPerHour)} 
+            subtitle="Descontando custos" 
+            icon={Target} 
+            color="emerald" 
+          />
+        </div>
+
+        {/* CARDS DE CUSTOS POR KM */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <SmartCard 
+            title="Custo Gas./KM (Painel)" 
+            value={formatMoney(metrics.fuelCostPerKmPanel)} 
+            subtitle={metrics.clusterAvg > 0 ? `Base Painel: ${metrics.clusterAvg.toFixed(1)} km/l` : 'Informe a média no ganho'} 
+            icon={Gauge} 
             color="orange" 
           />
           <SmartCard 
-            title="Custo Manut./KM" 
+            title="Custo Gas./KM (Bomba)" 
+            value={formatMoney(metrics.fuelCostPerKmPump)} 
+            subtitle={metrics.realAvg > 0 ? `Base Bomba: ${metrics.realAvg.toFixed(1)} km/l` : 'Falta reabastecer'} 
+            icon={Fuel} 
+            color="amber" 
+          />
+           <SmartCard 
+            title="Outros Custos/KM" 
             value={formatMoney(metrics.maintenanceCostPerKm)} 
-            subtitle="Outras despesas" 
+            subtitle="Manutenção, Lanches..." 
             icon={Wrench} 
             color="red" 
           />
+           <SmartCard 
+            title="Lucro Real/KM" 
+            value={formatMoney(metrics.profitPerKm)} 
+            subtitle="Margem final por km" 
+            icon={MapPin} 
+            color="teal" 
+          />
         </div>
-      </div>
-
-      {/* === COMPARAÇÃO DE MÉDIAS === */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-         <div className="bg-gray-900 p-4 rounded-xl border border-gray-800 flex items-center justify-between">
-            <div>
-               <p className="text-gray-500 text-[10px] font-bold uppercase">Média Painel (Informada)</p>
-               <h4 className="text-xl font-bold text-orange-400 mt-1">
-                  {metrics.clusterAvg > 0 ? metrics.clusterAvg.toFixed(1) : '--'} <span className="text-xs text-gray-600">km/l</span>
-               </h4>
-            </div>
-            <Gauge className="text-orange-500/20" size={32} />
-         </div>
-         <div className="bg-gray-900 p-4 rounded-xl border border-gray-800 flex items-center justify-between">
-            <div>
-               <p className="text-gray-500 text-[10px] font-bold uppercase">Média Real (Bomba)</p>
-               <h4 className="text-xl font-bold text-blue-400 mt-1">
-                  {metrics.realAvg > 0 ? metrics.realAvg.toFixed(1) : '--'} <span className="text-xs text-gray-600">km/l</span>
-               </h4>
-            </div>
-            <Fuel className="text-blue-500/20" size={32} />
-         </div>
       </div>
 
       {/* === GRÁFICO DE BARRAS (DIÁRIO) === */}
