@@ -1,6 +1,11 @@
 // app/lib/firebase.client.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { 
+  getAuth, 
+  setPersistence, 
+  browserLocalPersistence,
+  GoogleAuthProvider // <--- 1. Importação necessária
+} from "firebase/auth"; 
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -17,3 +22,13 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// === ADIÇÃO: Provider do Google ===
+// Isso cria a configuração necessária para o login funcionar e remove o erro no VS Code
+export const googleProvider = new GoogleAuthProvider(); 
+
+// === ADIÇÃO: Forçar persistência local ===
+// Isso garante que o login sobreviva ao fechar/abrir o navegador
+setPersistence(auth, browserLocalPersistence).catch((error) => {
+  console.error("Erro ao definir persistência do auth:", error);
+});
