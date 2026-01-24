@@ -1,19 +1,35 @@
 // app/routes/perfil.preferencias.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Add useEffect
+import { useLocation } from "react-router";   // Add useLocation
 import { SubHeader } from "~/components/sub-header";
 import { Moon, Sun, Bell, Volume2, Globe } from "lucide-react";
 
 export default function PerfilPreferencias() {
-  // Estados simulados para UI
   const [darkMode, setDarkMode] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [sounds, setSounds] = useState(false);
+  
+  // === NOVO: Lógica de Rolagem Automática ===
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash) {
+      const element = document.getElementById(location.hash.substring(1));
+      if (element) {
+        // Pequeno delay para garantir que a renderização terminou
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+          // Opcional: Efeito visual de destaque
+          element.classList.add("bg-emerald-500/5");
+          setTimeout(() => element.classList.remove("bg-emerald-500/5"), 1000);
+        }, 100);
+      }
+    }
+  }, [location]);
 
-  // Componente de Switch (Toggle)
   const Toggle = ({ active, onToggle }: { active: boolean, onToggle: () => void }) => (
     <button 
       onClick={onToggle}
-      className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${
+      className={`cursor-pointer w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${
         active ? "bg-emerald-500" : "bg-gray-700"
       }`}
     >
@@ -30,7 +46,7 @@ export default function PerfilPreferencias() {
       <div className="px-4 space-y-8">
         
         {/* Aparência */}
-        <section>
+        <section id="aparencia" className="transition-colors duration-500 rounded-xl">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 ml-1">
             Aparência
           </h2>
@@ -50,8 +66,8 @@ export default function PerfilPreferencias() {
           </div>
         </section>
 
-        {/* Notificações */}
-        <section>
+        {/* Notificações - ID ADICIONADO AQUI */}
+        <section id="notificacoes" className="transition-colors duration-500 rounded-xl">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 ml-1">
             Notificações e Sons
           </h2>

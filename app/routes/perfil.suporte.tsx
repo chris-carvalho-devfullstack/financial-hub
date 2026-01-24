@@ -1,8 +1,26 @@
 // app/routes/perfil.suporte.tsx
+import { useEffect } from "react";
+import { useLocation } from "react-router";
 import { SubHeader } from "~/components/sub-header";
 import { HelpCircle, MessageCircle, FileText, ChevronDown } from "lucide-react";
 
 export default function PerfilSuporte() {
+  // === NOVO: Lógica de Rolagem ===
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash) {
+      const element = document.getElementById(location.hash.substring(1));
+      if (element) {
+        setTimeout(() => {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          // Highlight visual
+          element.classList.add("ring-2", "ring-emerald-500/50");
+          setTimeout(() => element.classList.remove("ring-2", "ring-emerald-500/50"), 1500);
+        }, 100);
+      }
+    }
+  }, [location]);
+
   const faqs = [
     { 
       q: "Como exportar meus dados?", 
@@ -35,7 +53,7 @@ export default function PerfilSuporte() {
               <p className="text-emerald-100 text-sm mt-1 leading-relaxed">
                 Nossa equipe de suporte está disponível via WhatsApp para resolver seus problemas.
               </p>
-              <button className="mt-4 bg-white text-emerald-700 px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-50 transition-colors">
+              <button className="cursor-pointer mt-4 bg-white text-emerald-700 px-6 py-2.5 rounded-lg text-sm font-bold shadow-sm hover:bg-emerald-50 transition-colors">
                 Falar no WhatsApp
               </button>
             </div>
@@ -63,17 +81,17 @@ export default function PerfilSuporte() {
           </div>
         </section>
 
-        {/* Links Úteis */}
-        <section>
+        {/* Links Úteis - ID ADICIONADO AQUI */}
+        <section id="privacidade" className="transition-all duration-500 rounded-xl">
            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 ml-1 mt-6">
             Legal
           </h2>
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden divide-y divide-gray-800">
-             <button className="w-full flex items-center gap-3 p-4 hover:bg-gray-800 text-left">
+             <button className="cursor-pointer w-full flex items-center gap-3 p-4 hover:bg-gray-800 text-left">
                <FileText size={20} className="text-gray-400" />
                <span className="text-gray-300 text-sm">Termos de Uso</span>
              </button>
-             <button className="w-full flex items-center gap-3 p-4 hover:bg-gray-800 text-left">
+             <button className="cursor-pointer w-full flex items-center gap-3 p-4 hover:bg-gray-800 text-left">
                <FileText size={20} className="text-gray-400" />
                <span className="text-gray-300 text-sm">Política de Privacidade</span>
              </button>

@@ -19,7 +19,6 @@ export default function Perfil() {
   const navigate = useNavigate();
   const [user, setUser] = useState(auth.currentUser);
 
-  // Garante que o usuário esteja atualizado
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((u) => {
       if (!u) navigate("/login");
@@ -33,7 +32,6 @@ export default function Perfil() {
     navigate("/login");
   };
 
-  // Componente auxiliar para os itens do menu
   const MenuLink = ({ 
     icon: Icon, 
     label, 
@@ -76,10 +74,8 @@ export default function Perfil() {
 
   return (
     <div className="animate-fade-in pb-10">
-      {/* === CABEÇALHO DO PERFIL === */}
       <div className="relative bg-gray-900 border-b border-gray-800 pb-8 pt-10 px-6 mb-6">
         <div className="flex flex-col items-center">
-          {/* Foto com Glow e Botão de Editar */}
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-emerald-600 to-emerald-400 rounded-full blur opacity-40 group-hover:opacity-75 transition duration-500"></div>
             <div className="relative w-28 h-28 rounded-full border-4 border-gray-900 bg-gray-800 overflow-hidden flex items-center justify-center">
@@ -93,8 +89,6 @@ export default function Perfil() {
                 <User size={48} className="text-gray-500" />
               )}
             </div>
-            
-            {/* Botão flutuante para trocar foto (Leva para Dados Pessoais) */}
             <button 
               onClick={() => navigate("/perfil/dados")} 
               className="cursor-pointer absolute bottom-1 right-1 bg-gray-800 text-emerald-400 p-2 rounded-full border border-gray-700 shadow-lg hover:bg-gray-700 hover:text-white transition-colors"
@@ -117,10 +111,8 @@ export default function Perfil() {
         </div>
       </div>
 
-      {/* === MENU DE CONFIGURAÇÕES === */}
       <div className="px-4 max-w-2xl mx-auto space-y-6">
         
-        {/* Seção: Conta */}
         <section>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 ml-2">
             Conta
@@ -141,7 +133,6 @@ export default function Perfil() {
           </div>
         </section>
 
-        {/* Seção: Segurança */}
         <section>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 ml-2">
             Segurança
@@ -156,18 +147,19 @@ export default function Perfil() {
               icon={Shield} 
               label="Privacidade" 
               subLabel="Gerenciar compartilhamento de dados"
-              onClick={() => navigate("/perfil/suporte")} // Redireciona para suporte/legal
+              // CORREÇÃO: Adicionado ancora #privacidade
+              onClick={() => navigate("/perfil/suporte#privacidade")} 
             />
             <MenuLink 
               icon={Bell} 
               label="Notificações" 
               subLabel="Alertas de gastos e metas"
-              onClick={() => navigate("/perfil/preferencias")} // Redireciona para preferências
+              // CORREÇÃO: Adicionado ancora #notificacoes
+              onClick={() => navigate("/perfil/preferencias#notificacoes")} 
             />
           </div>
         </section>
 
-        {/* Seção: Suporte e Saída */}
         <section>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 ml-2">
             Outros
@@ -190,7 +182,6 @@ export default function Perfil() {
         <p className="text-center text-xs text-gray-600 pt-4 pb-8">
           Financial Hub v1.0.0 • Feito com ❤️
         </p>
-
       </div>
     </div>
   );
