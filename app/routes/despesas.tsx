@@ -70,9 +70,9 @@ export default function DespesasPage() {
   // Estados Comuns
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [amount, setAmount] = useState(""); 
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [description, setDescription] = useState("");
-  const [odometer, setOdometer] = useState(""); // AGORA USADO EM AMBAS AS ABAS
+  const [odometer, setOdometer] = useState(""); 
 
   // Estados Específicos de Combustível
   const [fuelType, setFuelType] = useState<FuelType>(FuelType.GASOLINE);
@@ -95,7 +95,6 @@ export default function DespesasPage() {
       setVehicles(data);
       if (data.length > 0 && !selectedVehicle) {
         setSelectedVehicle(data[0].id);
-        // Preenche o odômetro inicial
         if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer)); 
       }
     });
@@ -117,11 +116,17 @@ export default function DespesasPage() {
     return () => { unsubVehicles(); unsubExpenses(); };
   }, []);
 
-  // Atualizar odômetro no input ao trocar de carro (se o usuário ainda não digitou nada)
   useEffect(() => {
     const vehicle = vehicles.find(v => v.id === selectedVehicle);
     if (vehicle) setOdometer(String(vehicle.currentOdometer || ""));
   }, [selectedVehicle, vehicles]);
+
+  // === HELPER PARA BLOQUEAR NEGATIVOS ===
+  const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (["-", "e"].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
 
   // === CÁLCULOS ===
   const handleLitersChange = (val: string) => {
@@ -153,9 +158,9 @@ export default function DespesasPage() {
         vehicleId: selectedVehicle,
         type: 'EXPENSE',
         amount: amountInCents,
-        date: new Date(date).toISOString(),
+        date: new Date(`${date}T00:00:00`).toISOString(),
         description: activeTab === 'FUEL' ? 'Abastecimento' : description,
-        odometer: currentOdometerValue > 0 ? currentOdometerValue : null, // Salva ODÔMETRO em ambos
+        odometer: currentOdometerValue > 0 ? currentOdometerValue : null,
         createdAt: new Date().toISOString()
       };
 
@@ -177,8 +182,6 @@ export default function DespesasPage() {
         });
       }
 
-      // === ATUALIZAÇÃO DO VEÍCULO (INTELIGENTE) ===
-      // Funciona tanto para Abastecimento quanto para Manutenção
       const currentCar = vehicles.find(v => v.id === selectedVehicle);
       if (currentCar && currentOdometerValue > (currentCar.currentOdometer || 0)) {
         await updateDoc(doc(db, "vehicles", selectedVehicle), { 
@@ -195,7 +198,6 @@ export default function DespesasPage() {
       setLiters("");
       setStationName("");
       setDescription("");
-      // Não limpamos o odômetro pois ele deve persistir/avançar
 
     } catch (error) {
       console.error(error);
@@ -303,20 +305,22 @@ export default function DespesasPage() {
                           <div>
                             <label className="block text-xs text-emerald-400 mb-1 font-bold">Preço/Litro</label>
                             <input 
-                              type="number" step="0.01" required 
+                              type="number" step="0.01" required min="0"
                               value={pricePerLiter} 
                               onChange={e => handlePriceChange(e.target.value)} 
-                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none"
+                              onKeyDown={preventNegativeInput}
+                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               placeholder="0.00"
                             />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-400 mb-1">Total (R$)</label>
                             <input 
-                              type="number" step="0.01" 
+                              type="number" step="0.01" min="0"
                               value={amount} 
                               onChange={e => handleAmountChange(e.target.value)} 
-                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none"
+                              onKeyDown={preventNegativeInput}
+                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               placeholder="0.00"
                             />
                           </div>
@@ -324,10 +328,11 @@ export default function DespesasPage() {
                         
                         <div className="relative">
                            <input 
-                              type="number" step="0.001" required 
+                              type="number" step="0.001" required min="0"
                               value={liters} 
                               onChange={e => handleLitersChange(e.target.value)} 
-                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-16"
+                              onKeyDown={preventNegativeInput}
+                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <span className="absolute left-3 top-2 text-xs text-gray-500 uppercase font-bold tracking-wider">Litros</span>
                         </div>
@@ -336,7 +341,12 @@ export default function DespesasPage() {
                       {/* Odômetro na aba Fuel */}
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (KM Total)</label>
-                        <input type="number" required value={odometer} onChange={e => setOdometer(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg"/>
+                        <input 
+                          type="number" required min="0"
+                          value={odometer} onChange={e => setOdometer(e.target.value)} 
+                          onKeyDown={preventNegativeInput}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
                       </div>
 
                       <div className="flex items-center gap-3 py-2 bg-gray-800/30 p-2 rounded-lg cursor-pointer" onClick={() => setFullTank(!fullTank)}>
@@ -368,18 +378,24 @@ export default function DespesasPage() {
 
                       <div>
                           <label className="block text-xs text-emerald-500 mb-1 font-bold">Valor (R$)</label>
-                          <input type="number" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none"/>
+                          <input 
+                            type="number" step="0.01" required min="0"
+                            value={amount} onChange={e => setAmount(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
                       </div>
 
-                      {/* NOVO: Odômetro na aba Geral (Opcional, mas recomendado para manutenção) */}
+                      {/* Odômetro na aba Geral */}
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (Opcional)</label>
                         <input 
-                            type="number" 
+                            type="number" min="0"
                             value={odometer} 
                             onChange={e => setOdometer(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
                             placeholder="KM no momento do serviço"
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                         <p className="text-[10px] text-gray-500 mt-1">Informe se deseja atualizar a KM do veículo.</p>
                       </div>
@@ -434,7 +450,6 @@ export default function DespesasPage() {
                     <span className="text-xs text-gray-500 flex items-center gap-1 justify-end">
                       <Calendar size={12}/> {new Date(exp.date).toLocaleDateString('pt-BR')}
                     </span>
-                    {/* Exibe o Odômetro para QUALQUER despesa que tenha o dado */}
                     {exp.odometer && (
                         <span className="text-xs text-emerald-500/70 block mt-1 font-mono">
                            {exp.odometer} km

@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { 
   collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc 
-} from "firebase/firestore"; // <--- ADICIONADO: updateDoc
+} from "firebase/firestore"; 
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
-  LayoutGrid, ChevronUp, Trash2, Gauge 
+  LayoutGrid, ChevronUp, Trash2, Gauge,
+  AlertTriangle 
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
 import type { Vehicle, IncomeTransaction } from "~/types/models";
 
-// === CONFIGURAÇÃO DAS PLATAFORMAS (IMAGENS LOCAIS) ===
+// === CONFIGURAÇÃO DAS PLATAFORMAS ===
 const ALL_PLATFORMS = [
   { 
     id: Platform.UBER, 
@@ -60,6 +61,40 @@ const ALL_PLATFORMS = [
   },
 ];
 
+// === COMPONENTES ===
+function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl transform transition-all scale-100">
+        <div className="flex items-start gap-4">
+          <div className="bg-red-500/10 p-3 rounded-full">
+            <AlertTriangle className="text-red-500" size={24} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">{title}</h3>
+            <p className="text-gray-400 text-sm mt-1">{message}</p>
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button 
+            onClick={onClose} 
+            className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded-lg font-medium transition-colors"
+          >
+            Cancelar
+          </button>
+          <button 
+            onClick={onConfirm} 
+            className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-medium transition-colors"
+          >
+            Sim, excluir
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GanhosPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [recentGains, setRecentGains] = useState<IncomeTransaction[]>([]);
@@ -67,12 +102,13 @@ export default function GanhosPage() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
   // Estados do Formulário
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>(Platform.UBER);
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   
   // Métricas
   const [distance, setDistance] = useState("");
@@ -108,6 +144,14 @@ export default function GanhosPage() {
     return () => unsub && unsub();
   }, []);
 
+  // === HELPER PARA BLOQUEAR NEGATIVOS ===
+  const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Bloqueia '-' (menos) e 'e' (exponencial)
+    if (["-", "e"].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !selectedVehicle) return;
@@ -119,31 +163,25 @@ export default function GanhosPage() {
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
       const drivenKm = Number(distance) || 0;
 
-      // === LÓGICA DE ODÔMETRO INTELIGENTE ===
-      // 1. Encontra o veículo selecionado
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const currentOdometer = currentVehicle?.currentOdometer || 0;
-      
-      // 2. Calcula o novo odômetro (Base anterior + Viagem do dia)
       const finalOdometer = currentOdometer + drivenKm;
 
-      // 3. Salva a transação com o odômetro calculado
       await addDoc(collection(db, "transactions"), {
         userId: auth.currentUser.uid,
         vehicleId: selectedVehicle,
         type: 'INCOME',
         platform: selectedPlatform,
         amount: amountCents,
-        date: new Date(date).toISOString(),
+        date: new Date(`${date}T00:00:00`).toISOString(),
         distanceDriven: drivenKm,
         onlineDurationMinutes: Math.round(hoursNum * 60),
         tripsCount: Number(trips) || 0,
         clusterKmPerLiter: avgNum,
-        odometer: finalOdometer, // <--- CAMPO IMPORTANTE
+        odometer: finalOdometer,
         createdAt: new Date().toISOString()
       });
 
-      // 4. Atualiza o veículo (Se houve movimentação)
       if (drivenKm > 0) {
          const vehicleRef = doc(db, "vehicles", selectedVehicle);
          await updateDoc(vehicleRef, {
@@ -164,10 +202,20 @@ export default function GanhosPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Apagar registro?")) return;
-    setDeletingId(id);
-    try { await deleteDoc(doc(db, "transactions", id)); } catch (e) { console.error(e); } finally { setDeletingId(null); }
+  const handleRequestDelete = (id: string) => setItemToDelete(id);
+
+  const confirmDelete = async () => {
+    if (!itemToDelete) return;
+    setDeletingId(itemToDelete);
+    try { 
+      await deleteDoc(doc(db, "transactions", itemToDelete)); 
+    } catch (e) { 
+      console.error(e); 
+      alert("Erro ao excluir.");
+    } finally { 
+      setDeletingId(null); 
+      setItemToDelete(null);
+    }
   };
 
   const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -175,6 +223,15 @@ export default function GanhosPage() {
 
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      
+      <ConfirmModal 
+        isOpen={!!itemToDelete} 
+        onClose={() => setItemToDelete(null)}
+        onConfirm={confirmDelete}
+        title="Excluir Registro?"
+        message="Essa ação removerá o valor do seu faturamento e não pode ser desfeita."
+      />
+
       <div className="flex flex-col md:flex-row gap-8 items-start">
         <div className="flex-1 w-full md:max-w-2xl">
           
@@ -247,7 +304,13 @@ export default function GanhosPage() {
                       <label className="text-emerald-400 text-xs font-bold uppercase mb-2 block tracking-wider">Valor Total (R$)</label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-xl md:text-2xl">R$</span>
-                        <input type="number" step="0.01" required inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20" placeholder="0,00" />
+                        <input 
+                          type="number" step="0.01" required inputMode="decimal" min="0"
+                          value={amount} onChange={e => setAmount(e.target.value)} 
+                          onKeyDown={preventNegativeInput}
+                          className="w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                          placeholder="0,00" 
+                        />
                       </div>
                   </div>
                   <div>
@@ -257,7 +320,7 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* MÉTRICAS (GRID COM 4 COLUNAS AGORA) */}
+            {/* MÉTRICAS */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 
                 {/* 1. KM RODADOS */}
@@ -265,19 +328,26 @@ export default function GanhosPage() {
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados</label>
                    <div className="flex items-center gap-1.5">
                       <Map size={14} className="text-blue-500 shrink-0" />
-                      <input type="number" inputMode="numeric" value={distance} onChange={e => setDistance(e.target.value)} className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-blue-500 pb-0.5 text-sm md:text-base" placeholder="0" />
+                      <input 
+                        type="number" inputMode="numeric" min="0"
+                        value={distance} onChange={e => setDistance(e.target.value)} 
+                        onKeyDown={preventNegativeInput}
+                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-blue-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        placeholder="0" 
+                      />
                    </div>
                 </div>
 
-                {/* 2. MÉDIA PAINEL (NOVO) */}
+                {/* 2. MÉDIA PAINEL */}
                 <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
                    <div className="flex items-center gap-1.5">
                       <Gauge size={14} className="text-orange-500 shrink-0" />
                       <input 
-                        type="number" step="0.1" inputMode="decimal"
+                        type="number" step="0.1" inputMode="decimal" min="0"
                         value={clusterAvg} onChange={e => setClusterAvg(e.target.value)} 
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-orange-500 pb-0.5 text-sm md:text-base" 
+                        onKeyDown={preventNegativeInput}
+                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-orange-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
                         placeholder="km/l" 
                       />
                    </div>
@@ -288,7 +358,13 @@ export default function GanhosPage() {
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
                    <div className="flex items-center gap-1.5">
                       <Clock size={14} className="text-yellow-500 shrink-0" />
-                      <input type="number" step="0.1" inputMode="decimal" value={hours} onChange={e => setHours(e.target.value)} className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-yellow-500 pb-0.5 text-sm md:text-base" placeholder="0.0" />
+                      <input 
+                        type="number" step="0.1" inputMode="decimal" min="0"
+                        value={hours} onChange={e => setHours(e.target.value)} 
+                        onKeyDown={preventNegativeInput}
+                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-yellow-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        placeholder="0.0" 
+                      />
                    </div>
                 </div>
 
@@ -297,7 +373,13 @@ export default function GanhosPage() {
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Viagens</label>
                    <div className="flex items-center gap-1.5">
                       <Briefcase size={14} className="text-purple-500 shrink-0" />
-                      <input type="number" inputMode="numeric" value={trips} onChange={e => setTrips(e.target.value)} className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base" placeholder="0" />
+                      <input 
+                        type="number" inputMode="numeric" min="0"
+                        value={trips} onChange={e => setTrips(e.target.value)} 
+                        onKeyDown={preventNegativeInput}
+                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        placeholder="0" 
+                      />
                    </div>
                 </div>
             </div>
@@ -339,7 +421,13 @@ export default function GanhosPage() {
                        </div>
                        <div className="flex items-center gap-3">
                           <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
-                          <button onClick={() => handleDelete(gain.id)} disabled={isDeleting} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                          <button 
+                            onClick={() => handleRequestDelete(gain.id)} 
+                            disabled={isDeleting} 
+                            className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                        </div>
                     </div>
                   );
