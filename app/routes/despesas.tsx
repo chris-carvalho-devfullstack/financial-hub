@@ -1,7 +1,10 @@
 // app/routes/despesas.tsx
 import { useEffect, useState } from "react";
 import { collection, addDoc, query, where, orderBy, limit, onSnapshot, updateDoc, doc, deleteDoc } from "firebase/firestore";
-import { Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, AlertTriangle } from "lucide-react";
+import { 
+  Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, 
+  AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign 
+} from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { ExpenseCategory, FuelType } from "~/types/enums";
 import type { Vehicle } from "~/types/models";
@@ -11,7 +14,7 @@ import type { Vehicle } from "~/types/models";
 function SuccessModal({ isOpen, onClose, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-gray-900 border border-emerald-500/30 rounded-2xl p-6 max-w-sm w-full shadow-2xl transform transition-all scale-100">
         <div className="flex flex-col items-center text-center">
           <div className="h-16 w-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4">
@@ -34,7 +37,7 @@ function SuccessModal({ isOpen, onClose, title, message }: any) {
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
@@ -54,6 +57,200 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
+// === NOVO MODAL DE DETALHES E EDIÇÃO (DESPESAS) ===
+function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (transaction) {
+      setFormData({
+        amount: (transaction.amount / 100).toFixed(2),
+        date: new Date(transaction.date).toLocaleDateString('en-CA'),
+        odometer: transaction.odometer || 0,
+        // Campos de Combustível
+        liters: transaction.liters || 0,
+        pricePerLiter: transaction.pricePerLiter || 0,
+        stationName: transaction.stationName || "",
+        // Campos Gerais
+        description: transaction.description || "",
+        category: transaction.category || ""
+      });
+      setIsEditing(false);
+    }
+  }, [transaction]);
+
+  if (!isOpen || !transaction) return null;
+
+  const isFuel = transaction.category === 'FUEL' || transaction.category === ExpenseCategory.FUEL;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updates: any = {
+        amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
+        date: new Date(`${formData.date}T00:00:00`).toISOString(),
+        odometer: Number(formData.odometer),
+      };
+
+      if (isFuel) {
+         updates.liters = Number(formData.liters);
+         updates.pricePerLiter = Number(formData.pricePerLiter);
+         updates.stationName = formData.stationName;
+      } else {
+         updates.description = formData.description;
+         // updates.category = formData.category; // Opcional: permitir trocar categoria
+      }
+
+      await onUpdate(transaction.id, updates);
+      setIsEditing(false);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao atualizar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const InputField = ({ label, field, type = "number", step="any", placeholder="" }: any) => (
+    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
+      <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
+      <input 
+        type={type} 
+        step={step}
+        value={formData[field]} 
+        onChange={e => setFormData({...formData, [field]: e.target.value})}
+        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
+        placeholder={placeholder}
+      />
+    </div>
+  );
+
+  const DisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
+    <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
+       <div className="flex items-center gap-2">
+          {Icon && <Icon size={16} className={color} />}
+          <span className="text-sm text-gray-400">{label}</span>
+       </div>
+       <span className="font-bold text-white text-sm">{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        
+        {/* HEADER */}
+        <div className={`p-6 pb-8 relative ${isFuel ? 'bg-yellow-500/10' : 'bg-blue-500/10'}`}>
+           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors">
+              <X size={20} />
+           </button>
+           
+           <div className="flex flex-col items-center">
+              <div className={`w-16 h-16 rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4 ${isFuel ? 'bg-yellow-500 text-black' : 'bg-blue-600 text-white'}`}>
+                 {isFuel ? <Fuel size={32} /> : <Wrench size={32} />}
+              </div>
+              <h2 className="text-2xl font-bold text-white">
+                {isFuel ? 'Abastecimento' : 'Despesa / Serviço'}
+              </h2>
+              <div className="text-sm font-medium text-gray-400 opacity-80 uppercase tracking-wider">
+                 {isFuel ? 'Combustível' : (transaction.category === 'MAINTENANCE' ? 'Manutenção' : transaction.category)}
+              </div>
+           </div>
+        </div>
+
+        {/* BODY */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+           {isEditing ? (
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="col-span-2">
+                    <InputField label="Valor (R$)" field="amount" step="0.01" />
+                 </div>
+                 <div className="col-span-2">
+                    <InputField label="Data" field="date" type="date" />
+                 </div>
+                 <div className="col-span-2">
+                    <InputField label="Odômetro (KM)" field="odometer" />
+                 </div>
+
+                 {isFuel ? (
+                    <>
+                       <InputField label="Litros" field="liters" step="0.001" />
+                       <InputField label="Preço/Litro" field="pricePerLiter" step="0.001" />
+                       <div className="col-span-2">
+                          <InputField label="Nome do Posto" field="stationName" type="text" />
+                       </div>
+                    </>
+                 ) : (
+                    <div className="col-span-2">
+                       <InputField label="Descrição / Serviço" field="description" type="text" />
+                    </div>
+                 )}
+              </div>
+           ) : (
+              <div className="space-y-3">
+                 <div className="text-center mb-6">
+                    <span className="text-4xl font-bold text-emerald-400">
+                       {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
+                       <Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    </p>
+                 </div>
+
+                 <div className="grid grid-cols-1 gap-3">
+                    <DisplayField label="Odômetro" value={`${formData.odometer ? formData.odometer + ' km' : 'Não informado'}`} icon={Gauge} color="text-emerald-500" />
+                    
+                    {isFuel ? (
+                       <>
+                          <DisplayField label="Posto" value={formData.stationName} icon={MapPin} color="text-red-400" />
+                          <div className="grid grid-cols-2 gap-3">
+                             <DisplayField label="Litros" value={`${Number(formData.liters).toFixed(1)} L`} icon={Droplets} color="text-blue-400" />
+                             <DisplayField label="Preço/L" value={`R$ ${Number(formData.pricePerLiter).toFixed(2)}`} icon={DollarSign} color="text-green-400" />
+                          </div>
+                       </>
+                    ) : (
+                       <DisplayField label="Descrição" value={formData.description || formData.category} icon={FileText} color="text-gray-300" />
+                    )}
+                 </div>
+              </div>
+           )}
+        </div>
+
+        {/* FOOTER */}
+        <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex gap-3">
+           {isEditing ? (
+             <>
+               <button 
+                 onClick={() => setIsEditing(false)}
+                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors"
+               >
+                 Cancelar
+               </button>
+               <button 
+                 onClick={handleSave}
+                 disabled={saving}
+                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+               >
+                 {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
+               </button>
+             </>
+           ) : (
+             <button 
+               onClick={() => setIsEditing(true)}
+               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"
+             >
+               <Pencil size={18} /> Editar Despesa
+             </button>
+           )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // === PÁGINA PRINCIPAL ===
 
 export default function DespesasPage() {
@@ -66,6 +263,9 @@ export default function DespesasPage() {
   // Estados de Modal
   const [showSuccess, setShowSuccess] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  
+  // ESTADO PARA O MODAL DE DETALHES
+  const [selectedExpense, setSelectedExpense] = useState<any | null>(null);
 
   // Estados Comuns
   const [selectedVehicle, setSelectedVehicle] = useState("");
@@ -206,6 +406,15 @@ export default function DespesasPage() {
     }
   };
 
+  const handleUpdateExpense = async (id: string, data: any) => {
+    try {
+       const ref = doc(db, "transactions", id);
+       await updateDoc(ref, data);
+    } catch (error) {
+       throw error;
+    }
+ };
+
   const handleDelete = async () => {
     if (deleteId) {
       await deleteDoc(doc(db, "transactions", deleteId));
@@ -235,6 +444,13 @@ export default function DespesasPage() {
         onConfirm={handleDelete}
         title="Excluir Despesa?"
         message="Essa ação não pode ser desfeita e removerá o registro do cálculo financeiro."
+      />
+
+      <ExpenseDetailsModal
+        isOpen={!!selectedExpense}
+        transaction={selectedExpense}
+        onClose={() => setSelectedExpense(null)}
+        onUpdate={handleUpdateExpense}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -424,13 +640,20 @@ export default function DespesasPage() {
 
           <div className="space-y-3">
             {recentExpenses.map((exp) => (
-              <div key={exp.id} className="group bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center hover:border-emerald-500/30 transition-all hover:bg-gray-800/50">
+              <div 
+                key={exp.id} 
+                onClick={() => setSelectedExpense(exp)}
+                className="group bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center hover:border-emerald-500/30 transition-all hover:bg-gray-800/50 cursor-pointer"
+              >
                 <div className="flex items-center gap-4">
                   <div className={`h-12 w-12 rounded-xl flex items-center justify-center border border-opacity-10 ${exp.category === 'FUEL' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500' : 'bg-blue-500/10 text-blue-500 border-blue-500'}`}>
                     {exp.category === 'FUEL' ? <Fuel size={20}/> : <Wrench size={20}/>}
                   </div>
                   <div>
-                    <p className="font-bold text-white text-lg">{formatMoney(exp.amount)}</p>
+                    <p className="font-bold text-white text-lg flex items-center gap-2">
+                       {formatMoney(exp.amount)}
+                       <ExternalLink size={12} className="opacity-0 group-hover:opacity-50 text-gray-400" />
+                    </p>
                     <p className="text-sm text-gray-400 capitalize flex items-center gap-2">
                       {exp.category === 'FUEL' 
                         ? (
@@ -458,8 +681,11 @@ export default function DespesasPage() {
                   </div>
                   
                   <button 
-                    onClick={() => setDeleteId(exp.id)}
-                    className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-100 sm:opacity-0 group-hover:opacity-100"
+                    onClick={(e) => {
+                       e.stopPropagation();
+                       setDeleteId(exp.id);
+                    }}
+                    className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
                     title="Excluir registro"
                   >
                     <Trash2 size={18} />

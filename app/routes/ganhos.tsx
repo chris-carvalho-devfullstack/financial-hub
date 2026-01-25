@@ -8,7 +8,8 @@ import {
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
   LayoutGrid, ChevronUp, Trash2, Gauge,
-  AlertTriangle 
+  AlertTriangle, Navigation, FileText,
+  Pencil, X, Save, Calendar, ExternalLink
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
@@ -61,12 +62,13 @@ const ALL_PLATFORMS = [
   },
 ];
 
-// === COMPONENTES ===
+// === COMPONENTES AUXILIARES ===
+
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl transform transition-all scale-100">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
             <AlertTriangle className="text-red-500" size={24} />
@@ -95,6 +97,195 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
+// === NOVO MODAL DE DETALHES E EDIÇÃO ===
+function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (transaction) {
+      setFormData({
+        amount: (transaction.amount / 100).toFixed(2),
+        date: new Date(transaction.date).toLocaleDateString('en-CA'),
+        distanceDriven: transaction.distanceDriven || 0,
+        odometer: transaction.odometer || 0,
+        clusterKmPerLiter: transaction.clusterKmPerLiter || 0,
+        onlineDurationMinutes: transaction.onlineDurationMinutes ? (transaction.onlineDurationMinutes / 60).toFixed(1) : 0,
+        tripsCount: transaction.tripsCount || 0,
+        description: transaction.description || ""
+      });
+      setIsEditing(false);
+    }
+  }, [transaction]);
+
+  if (!isOpen || !transaction) return null;
+
+  const platformInfo = ALL_PLATFORMS.find(p => p.id === transaction.platform) || ALL_PLATFORMS[5];
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updates = {
+        amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
+        date: new Date(`${formData.date}T00:00:00`).toISOString(),
+        distanceDriven: Number(formData.distanceDriven),
+        odometer: Number(formData.odometer),
+        clusterKmPerLiter: Number(formData.clusterKmPerLiter),
+        onlineDurationMinutes: Math.round(Number(formData.onlineDurationMinutes) * 60),
+        tripsCount: Number(formData.tripsCount),
+        description: formData.description
+      };
+      await onUpdate(transaction.id, updates);
+      setIsEditing(false);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao atualizar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const InputField = ({ label, field, type = "number", step="any" }: any) => (
+    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
+      <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
+      <input 
+        type={type} 
+        step={step}
+        value={formData[field]} 
+        onChange={e => setFormData({...formData, [field]: e.target.value})}
+        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
+      />
+    </div>
+  );
+
+  const DisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
+    <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
+       <div className="flex items-center gap-2">
+          {Icon && <Icon size={16} className={color} />}
+          <span className="text-sm text-gray-400">{label}</span>
+       </div>
+       <span className="font-bold text-white text-sm">{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        
+        {/* HEADER */}
+        <div className={`p-6 pb-8 relative ${platformInfo.bg}`}>
+           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors">
+              <X size={20} />
+           </button>
+           
+           <div className="flex flex-col items-center">
+              <div className="w-16 h-16 bg-white rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4">
+                 {platformInfo.logo ? <img src={platformInfo.logo} className="w-full object-contain" /> : platformInfo.icon}
+              </div>
+              <h2 className={`text-2xl font-bold ${platformInfo.textColor === 'text-black' ? 'text-gray-900' : 'text-white'}`}>
+                {platformInfo.label}
+              </h2>
+              <div className={`text-sm font-medium opacity-80 ${platformInfo.textColor === 'text-black' ? 'text-gray-800' : 'text-gray-300'}`}>
+                 Detalhes do Lançamento
+              </div>
+           </div>
+        </div>
+
+        {/* BODY */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+           {isEditing ? (
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="col-span-2">
+                    <InputField label="Valor (R$)" field="amount" step="0.01" />
+                 </div>
+                 <div className="col-span-2">
+                    <InputField label="Data" field="date" type="date" />
+                 </div>
+                 <InputField label="KM Trip" field="distanceDriven" />
+                 <InputField label="Odômetro" field="odometer" />
+                 <InputField label="Média Painel" field="clusterKmPerLiter" step="0.1" />
+                 <InputField label="Horas Online" field="onlineDurationMinutes" step="0.1" />
+                 <InputField label="Viagens" field="tripsCount" />
+                 <div className="col-span-2">
+                   <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
+                      <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">Observação</label>
+                      <input 
+                        type="text"
+                        value={formData.description} 
+                        onChange={e => setFormData({...formData, description: e.target.value})}
+                        className="w-full bg-transparent text-white font-medium outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
+                      />
+                   </div>
+                 </div>
+              </div>
+           ) : (
+              <div className="space-y-3">
+                 <div className="text-center mb-6">
+                    <span className="text-4xl font-bold text-emerald-400">
+                       {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
+                       <Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    </p>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-3">
+                    <DisplayField label="KM Trip" value={`${formData.distanceDriven} km`} icon={Map} color="text-blue-500" />
+                    <DisplayField label="Odômetro" value={`${formData.odometer} km`} icon={Navigation} color="text-emerald-500" />
+                    <DisplayField label="Média" value={`${formData.clusterKmPerLiter} km/l`} icon={Gauge} color="text-orange-500" />
+                    <DisplayField label="Duração" value={`${formData.onlineDurationMinutes} h`} icon={Clock} color="text-yellow-500" />
+                    <DisplayField label="Viagens" value={formData.tripsCount} icon={Briefcase} color="text-purple-500" />
+                 </div>
+
+                 {formData.description && (
+                    <div className="mt-4 p-3 bg-gray-800 rounded-xl border border-dashed border-gray-700">
+                       <h4 className="text-xs uppercase text-gray-500 font-bold mb-1 flex items-center gap-1">
+                          <FileText size={12}/> Observação
+                       </h4>
+                       <p className="text-gray-300 text-sm italic">"{formData.description}"</p>
+                    </div>
+                 )}
+              </div>
+           )}
+        </div>
+
+        {/* FOOTER */}
+        <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex gap-3">
+           {isEditing ? (
+             <>
+               <button 
+                 onClick={() => setIsEditing(false)}
+                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors"
+               >
+                 Cancelar
+               </button>
+               <button 
+                 onClick={handleSave}
+                 disabled={saving}
+                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+               >
+                 {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
+               </button>
+             </>
+           ) : (
+             <button 
+               onClick={() => setIsEditing(true)}
+               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"
+             >
+               <Pencil size={18} /> Editar Lançamento
+             </button>
+           )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+
+// === PÁGINA PRINCIPAL ===
+
 export default function GanhosPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [recentGains, setRecentGains] = useState<IncomeTransaction[]>([]);
@@ -103,6 +294,9 @@ export default function GanhosPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  
+  // ESTADO PARA O MODAL DE DETALHES
+  const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransaction | null>(null);
 
   // Estados do Formulário
   const [selectedVehicle, setSelectedVehicle] = useState("");
@@ -111,10 +305,12 @@ export default function GanhosPage() {
   const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   
   // Métricas
-  const [distance, setDistance] = useState("");
+  const [distance, setDistance] = useState(""); 
+  const [odometerInput, setOdometerInput] = useState(""); 
+  const [clusterAvg, setClusterAvg] = useState(""); 
   const [hours, setHours] = useState("");
   const [trips, setTrips] = useState("");
-  const [clusterAvg, setClusterAvg] = useState(""); 
+  const [description, setDescription] = useState(""); 
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
@@ -125,7 +321,10 @@ export default function GanhosPage() {
         onSnapshot(qVehicles, (snap) => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
           setVehicles(data);
-          if (data.length > 0 && !selectedVehicle) setSelectedVehicle(data[0].id);
+          
+          if (data.length > 0 && !selectedVehicle) {
+             setSelectedVehicle(data[0].id);
+          }
         });
 
         const qGains = query(
@@ -144,13 +343,25 @@ export default function GanhosPage() {
     return () => unsub && unsub();
   }, []);
 
-  // === HELPER PARA BLOQUEAR NEGATIVOS ===
+  useEffect(() => {
+      if (selectedVehicle && vehicles.length > 0) {
+          const v = vehicles.find(vec => vec.id === selectedVehicle);
+          if (v) {
+              const current = v.currentOdometer || 0;
+              if (odometerInput === "") {
+                 setOdometerInput(String(current));
+              }
+          }
+      }
+  }, [selectedVehicle, vehicles]);
+
   const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Bloqueia '-' (menos) e 'e' (exponencial)
     if (["-", "e"].includes(e.key)) {
       e.preventDefault();
     }
   };
+
+  // === AÇÕES ===
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,11 +372,12 @@ export default function GanhosPage() {
       const amountCents = Math.round(parseFloat(amount.replace(',', '.')) * 100);
       const hoursNum = parseFloat(hours.replace(',', '.')) || 0;
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
-      const drivenKm = Number(distance) || 0;
+      
+      const drivenKm = Number(distance) || 0;         
+      const finalOdometer = Number(odometerInput) || 0; 
 
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
-      const currentOdometer = currentVehicle?.currentOdometer || 0;
-      const finalOdometer = currentOdometer + drivenKm;
+      const startOdometer = currentVehicle?.currentOdometer || 0;
 
       await addDoc(collection(db, "transactions"), {
         userId: auth.currentUser.uid,
@@ -174,15 +386,16 @@ export default function GanhosPage() {
         platform: selectedPlatform,
         amount: amountCents,
         date: new Date(`${date}T00:00:00`).toISOString(),
-        distanceDriven: drivenKm,
+        distanceDriven: drivenKm, 
         onlineDurationMinutes: Math.round(hoursNum * 60),
         tripsCount: Number(trips) || 0,
         clusterKmPerLiter: avgNum,
-        odometer: finalOdometer,
+        odometer: finalOdometer, 
+        description: description, 
         createdAt: new Date().toISOString()
       });
 
-      if (drivenKm > 0) {
+      if (finalOdometer > startOdometer) {
          const vehicleRef = doc(db, "vehicles", selectedVehicle);
          await updateDoc(vehicleRef, {
             currentOdometer: finalOdometer
@@ -191,9 +404,11 @@ export default function GanhosPage() {
 
       setAmount("");
       setDistance("");
+      setOdometerInput(""); 
       setHours("");
       setTrips("");
       setClusterAvg(""); 
+      setDescription(""); 
       setSaving(false);
     } catch (error) {
       console.error(error);
@@ -202,7 +417,21 @@ export default function GanhosPage() {
     }
   };
 
-  const handleRequestDelete = (id: string) => setItemToDelete(id);
+  const handleUpdateTransaction = async (id: string, data: any) => {
+     try {
+        const ref = doc(db, "transactions", id);
+        await updateDoc(ref, data);
+        // Não vamos atualizar o odômetro do veículo aqui para evitar inconsistências em edições retroativas,
+        // mas o usuário pode ajustar manualmente no formulário principal se necessário.
+     } catch (error) {
+        throw error;
+     }
+  };
+
+  const handleRequestDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation(); // Impede abrir o modal de detalhes
+    setItemToDelete(id);
+  };
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
@@ -224,12 +453,20 @@ export default function GanhosPage() {
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
+      {/* MODAIS */}
       <ConfirmModal 
         isOpen={!!itemToDelete} 
         onClose={() => setItemToDelete(null)}
         onConfirm={confirmDelete}
         title="Excluir Registro?"
         message="Essa ação removerá o valor do seu faturamento e não pode ser desfeita."
+      />
+
+      <TransactionDetailsModal 
+        isOpen={!!selectedTransaction}
+        transaction={selectedTransaction}
+        onClose={() => setSelectedTransaction(null)}
+        onUpdate={handleUpdateTransaction}
       />
 
       <div className="flex flex-col md:flex-row gap-8 items-start">
@@ -321,11 +558,11 @@ export default function GanhosPage() {
             </div>
 
             {/* MÉTRICAS */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 
-                {/* 1. KM RODADOS */}
+                {/* 1. KM RODADOS (TRIP) */}
                 <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados</label>
+                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados (Trip)</label>
                    <div className="flex items-center gap-1.5">
                       <Map size={14} className="text-blue-500 shrink-0" />
                       <input 
@@ -338,7 +575,23 @@ export default function GanhosPage() {
                    </div>
                 </div>
 
-                {/* 2. MÉDIA PAINEL */}
+                {/* 2. ODÔMETRO FINAL (PAINEL) */}
+                <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
+                   <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-500 blur-md opacity-20"></div>
+                   <label className="text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Odômetro Final</label>
+                   <div className="flex items-center gap-1.5">
+                      <Navigation size={14} className="text-emerald-500 shrink-0" />
+                      <input 
+                        type="number" inputMode="numeric" min="0"
+                        value={odometerInput} onChange={e => setOdometerInput(e.target.value)} 
+                        onKeyDown={preventNegativeInput}
+                        className="w-full bg-transparent text-emerald-100 font-bold outline-none border-b border-emerald-500/50 focus:border-emerald-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        placeholder="Total" 
+                      />
+                   </div>
+                </div>
+
+                {/* 3. MÉDIA PAINEL */}
                 <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
                    <div className="flex items-center gap-1.5">
@@ -353,7 +606,7 @@ export default function GanhosPage() {
                    </div>
                 </div>
 
-                {/* 3. HORAS */}
+                {/* 4. HORAS */}
                 <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
                    <div className="flex items-center gap-1.5">
@@ -368,7 +621,7 @@ export default function GanhosPage() {
                    </div>
                 </div>
 
-                {/* 4. VIAGENS */}
+                {/* 5. VIAGENS */}
                 <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Viagens</label>
                    <div className="flex items-center gap-1.5">
@@ -379,6 +632,20 @@ export default function GanhosPage() {
                         onKeyDown={preventNegativeInput}
                         className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
                         placeholder="0" 
+                      />
+                   </div>
+                </div>
+
+                {/* 6. OBSERVAÇÃO */}
+                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Observação</label>
+                   <div className="flex items-center gap-1.5">
+                      <FileText size={14} className="text-gray-400 shrink-0" />
+                      <input 
+                        type="text"
+                        value={description} onChange={e => setDescription(e.target.value)} 
+                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-gray-400 pb-0.5 text-sm md:text-base" 
+                        placeholder="Ex: Chuva" 
                       />
                    </div>
                 </div>
@@ -402,13 +669,20 @@ export default function GanhosPage() {
                   const platformInfo = getPlatformDetails(gain.platform);
                   const isDeleting = deletingId === gain.id;
                   return (
-                    <div key={gain.id} className="group relative bg-gray-900 border border-gray-800 hover:border-gray-600 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 active:bg-gray-800">
+                    <div 
+                      key={gain.id} 
+                      onClick={() => setSelectedTransaction(gain)}
+                      className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
+                    >
                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-white flex items-center justify-center shadow-sm overflow-hidden">
+                          <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-white flex items-center justify-center shadow-sm overflow-hidden relative">
                             {platformInfo.logo ? <img src={platformInfo.logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-blue-600 flex items-center justify-center">{platformInfo.icon}</div>}
                           </div>
                           <div>
-                             <p className="font-bold text-white text-sm leading-tight">{platformInfo.label}</p>
+                             <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
+                               {platformInfo.label}
+                               <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
+                             </p>
                              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
                                 <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
                                 {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
@@ -416,15 +690,21 @@ export default function GanhosPage() {
                                       <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
                                    </span>
                                 )}
+                                {gain.description && (
+                                  <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
+                                     <FileText size={10}/> {gain.description}
+                                  </span>
+                                )}
                              </div>
                           </div>
                        </div>
                        <div className="flex items-center gap-3">
                           <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
                           <button 
-                            onClick={() => handleRequestDelete(gain.id)} 
+                            onClick={(e) => handleRequestDelete(e, gain.id)} 
                             disabled={isDeleting} 
-                            className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                            className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
+                            title="Excluir"
                           >
                             <Trash2 size={16} />
                           </button>

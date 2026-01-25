@@ -1,65 +1,71 @@
 // app/types/models.ts
 
+import { Platform, ExpenseCategory, FuelType, VehicleType } from "./enums";
+
 export interface Vehicle {
   id: string;
   userId: string;
   name: string;
-  plate?: string;
-  model?: string;
-  createdAt: string;
-  currentOdometer?: number; // <--- NOVO: O KM atual do carro (snapshot)
-}
+  
+  // === TIPO DO VEÍCULO (Novo) ===
+  type?: VehicleType; 
+  // ==============================
 
-export type TransactionType = 'INCOME' | 'EXPENSE';
+  // === Detalhes do Veículo ===
+  brand?: string;       // Marca (Ex: Fiat)
+  model?: string;       // Modelo (Ex: Mobi)
+  year?: number;        // Ano
+  licensePlate?: string;// Placa
+  // ===========================
+
+  currentOdometer: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export interface BaseTransaction {
   id: string;
   userId: string;
   vehicleId: string;
-  type: TransactionType;
-  amount: number; // Em centavos
-  date: string;   // ISO String
-  description?: string;
+  amount: number; // em centavos
+  date: string;   // ISO date
+  odometer?: number; // Snapshot do odômetro no momento
+  description?: string; // Observação geral
   createdAt: string;
-  odometer?: number; // <--- NOVO: O KM do painel no momento do registro (Histórico)
 }
 
 export interface IncomeTransaction extends BaseTransaction {
   type: 'INCOME';
-  platform: string;
+  platform: Platform;
   distanceDriven: number;
   onlineDurationMinutes: number;
-  tripsCount?: number;
-  clusterKmPerLiter?: number; 
+  tripsCount: number;
+  clusterKmPerLiter?: number; // Média do painel
 }
 
 export interface ExpenseTransaction extends BaseTransaction {
   type: 'EXPENSE';
-  category: string;
-}
-
-export interface FuelTransaction extends ExpenseTransaction {
-  category: 'Combustível';
-  liters: number;
-  pricePerLiter: number; 
-  odometer: number; // Em abastecimentos, continua obrigatório (e sobrescreve o opcional da base)
-  fuelType: string;
+  category: ExpenseCategory;
+  isFixedCost: boolean; // se é custo fixo (seguro, ipva) ou variável
+  
+  // Campos específicos de combustível
+  fuelType?: FuelType;
+  liters?: number;
+  pricePerLiter?: number;
+  fullTank?: boolean;
   stationName?: string;
-  fullTank: boolean;
 }
 
-export type Transaction = IncomeTransaction | ExpenseTransaction | FuelTransaction;
+export type Transaction = IncomeTransaction | ExpenseTransaction;
 
-// === NOVA INTERFACE: METAS (GOALS) ===
 export interface Goal {
   id: string;
   userId: string;
-  title: string;        // Título (ex: "Viagem 2024")
-  description?: string; // Descrição curta
-  targetAmount: number; // Meta de ganhos (Valor Alvo)
-  currentAmount: number;// Quanto já juntou
-  purpose: string;      // Finalidade planejada
-  deadline?: string;    // Data limite (opcional)
+  title: string;
+  targetAmount: number; // em centavos
+  currentAmount: number; // em centavos
+  deadline?: string;
+  icon?: string; // identificador do ícone
+  color?: string; // hex code
   createdAt: string;
-  status: 'ACTIVE' | 'COMPLETED';
 }

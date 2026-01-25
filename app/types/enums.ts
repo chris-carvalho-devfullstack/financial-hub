@@ -37,3 +37,11 @@ export enum FuelType {
   CNG = 'CNG',
   ELECTRIC = 'ELECTRIC',
 }
+
+// === NOVO ENUM PARA O CADASTRO DE VEÍCULOS ===
+export enum VehicleType {
+  CAR = 'CAR',
+  MOTORCYCLE = 'MOTORCYCLE',
+  PICKUP = 'PICKUP',
+  TRUCK = 'TRUCK'
+}
