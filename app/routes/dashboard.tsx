@@ -7,10 +7,11 @@ import {
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign
+  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign, Car
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
-import type { Transaction, IncomeTransaction, FuelTransaction, ExpenseTransaction } from "~/types/models";
+// CORREÇÃO 1: Removido FuelTransaction da importação, pois não existe no models.ts
+import type { Transaction, IncomeTransaction, ExpenseTransaction, Vehicle } from "~/types/models";
 import { ExpenseCategory } from "~/types/enums";
 import { OdometerChart } from "~/components/OdometerChart"; 
 
@@ -91,6 +92,9 @@ function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = fals
 }
 
 export default function Dashboard() {
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
+  
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [lastFuelPrice, setLastFuelPrice] = useState<number>(0); 
@@ -102,7 +106,7 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState({
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
-    trips: 0, // <--- Novo: Total de Corridas
+    trips: 0, 
     
     // Indicadores Operacionais
     avgTicket: 0,    // Valor médio por corrida
@@ -130,37 +134,65 @@ export default function Dashboard() {
     setCurrentDate(newDate);
   };
 
+  // 1. Carregar Veículos (Para o filtro)
   useEffect(() => {
     if (!auth.currentUser) return;
+    const q = query(collection(db, "vehicles"), where("userId", "==", auth.currentUser.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
+      setVehicles(data);
+      if (data.length > 0 && !selectedVehicleId) {
+        setSelectedVehicleId(data[0].id);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // 2. Buscar último preço de combustível DO VEÍCULO SELECIONADO
+  useEffect(() => {
+    if (!auth.currentUser || !selectedVehicleId) return;
+    
     const fetchLastFuel = async () => {
       const q = query(
         collection(db, "transactions"),
         where("userId", "==", auth.currentUser?.uid),
+        where("vehicleId", "==", selectedVehicleId),
         where("type", "==", "EXPENSE"),
         orderBy("date", "desc"),
-        limit(100) 
+        limit(10) 
       );
-      const snap = await getDocs(q);
       
-      const fuelTrans = snap.docs
-        .map(d => d.data() as ExpenseTransaction)
-        .find(t => t.category === ExpenseCategory.FUEL || t.category === 'Combustível') as FuelTransaction | undefined;
-      
-      if (fuelTrans && fuelTrans.pricePerLiter) {
-        setLastFuelPrice(fuelTrans.pricePerLiter);
+      try {
+        const snap = await getDocs(q);
+        // CORREÇÃO 2: Tipagem correta para ExpenseTransaction
+        const fuelTrans = snap.docs
+          .map(d => d.data() as ExpenseTransaction)
+          .find(t => t.pricePerLiter && t.pricePerLiter > 0);
+        
+        if (fuelTrans && fuelTrans.pricePerLiter) {
+          setLastFuelPrice(fuelTrans.pricePerLiter);
+        } else {
+          setLastFuelPrice(0);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar preço combustível:", error);
       }
     };
+    
     fetchLastFuel();
-  }, []);
+  }, [selectedVehicleId]);
 
+  // 3. Buscar Transações e Calcular Métricas
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !selectedVehicleId) return;
+    
     setLoading(true);
     const { start, end } = getStartEndDates(currentDate, timeFilter);
     
     const q = query(
       collection(db, "transactions"),
       where("userId", "==", auth.currentUser.uid),
+      where("vehicleId", "==", selectedVehicleId),
       where("date", ">=", start.toISOString()),
       where("date", "<=", end.toISOString()),
       orderBy("date", "asc")
@@ -174,7 +206,7 @@ export default function Dashboard() {
     });
 
     return () => unsubscribe();
-  }, [currentDate, timeFilter, lastFuelPrice]);
+  }, [currentDate, timeFilter, lastFuelPrice, selectedVehicleId]);
 
   const calculateMetrics = (data: Transaction[], start: Date, end: Date) => {
     let income = 0;
@@ -184,7 +216,7 @@ export default function Dashboard() {
     let totalLitersRefueled = 0;
     let sumClusterAvg = 0;
     let countClusterEntries = 0;
-    let trips = 0; // <--- Novo
+    let trips = 0; 
     
     let maintenanceExpenses = 0; 
     
@@ -207,7 +239,7 @@ export default function Dashboard() {
 
         if (inc.distanceDriven) km += Number(inc.distanceDriven);
         if (inc.onlineDurationMinutes) minutes += Number(inc.onlineDurationMinutes);
-        if (inc.tripsCount) trips += Number(inc.tripsCount); // <--- Soma Corridas
+        if (inc.tripsCount) trips += Number(inc.tripsCount);
         
         if (inc.clusterKmPerLiter && inc.clusterKmPerLiter > 0) {
           sumClusterAvg += Number(inc.clusterKmPerLiter);
@@ -218,11 +250,14 @@ export default function Dashboard() {
         dayData.expense += val;
         
         const exp = t as ExpenseTransaction;
-        const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'Combustível';
+        
+        // CORREÇÃO 3: Comparação segura de Enum com conversão 'as string' para legado
+        const categoryStr = exp.category as string; 
+        const isFuel = exp.category === ExpenseCategory.FUEL || categoryStr === 'Combustível' || categoryStr === 'FUEL';
         
         if (isFuel) {
-           const fuel = t as FuelTransaction;
-           if (fuel.liters) totalLitersRefueled += fuel.liters;
+           // Como ExpenseTransaction tem os campos de fuel opcionais, usamos direto
+           if (exp.liters) totalLitersRefueled += exp.liters;
         } else {
            maintenanceExpenses += val;
         }
@@ -241,33 +276,24 @@ export default function Dashboard() {
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
     // === CUSTOS POR KM ===
-
-    // 1. Custo Combustível (Painel)
-    // Lógica: Se o painel diz que faz 10km/l e a gasolina custa R$5, o custo é R$0,50/km.
     let fuelCostPerKmPanel = 0;
     if (clusterAvg > 0 && lastFuelPrice > 0) {
       fuelCostPerKmPanel = lastFuelPrice / clusterAvg;
     }
 
-    // 2. Custo Combustível (Bomba/Real)
-    // Lógica: Usa a média real calculada na bomba.
     let fuelCostPerKmPump = 0;
     if (realAvg > 0 && lastFuelPrice > 0) {
       fuelCostPerKmPump = lastFuelPrice / realAvg;
     }
 
-    // 3. Custo Manutenção
     const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
 
-    // === LUCRATIVIDADE REAL ===
-    // Para ser justo, se tivermos a estimativa do painel, usamos ela para o dia a dia.
-    // Se não, tentamos a da bomba.
-    const usedFuelCostPerKm = fuelCostPerKmPanel > 0 ? fuelCostPerKmPanel : fuelCostPerKmPump;
+    const usedFuelCostPerKm = fuelCostPerKmPump > 0 ? fuelCostPerKmPump : fuelCostPerKmPanel;
     const totalOperationalCost = (usedFuelCostPerKm * km) + maintenanceExpenses;
-    const realProfit = income - totalOperationalCost;
-
-    const profitPerHour = hours > 0 ? (realProfit / hours) : 0;
-    const profitPerKm = km > 0 ? (realProfit / km) : 0;
+    
+    const realProfitPerHour = hours > 0 ? ((income - totalOperationalCost) / hours) : 0;
+    const realProfitPerKm = km > 0 ? ((income - totalOperationalCost) / km) : 0;
+    
     const grossPerHour = hours > 0 ? income / hours : 0;
     const grossPerKm = km > 0 ? income / km : 0;
     const activeDays = dailyMap.size || 1;
@@ -281,7 +307,8 @@ export default function Dashboard() {
     setMetrics({
       income, expense, profit, km, hours, trips,
       avgTicket, tripsPerHour,
-      profitPerHour, profitPerKm, 
+      profitPerHour: realProfitPerHour, 
+      profitPerKm: realProfitPerKm, 
       fuelCostPerKmPanel, fuelCostPerKmPump, maintenanceCostPerKm,
       grossPerHour, grossPerKm, avgDailyIncome, 
       clusterAvg, realAvg, bestApp
@@ -306,18 +333,34 @@ export default function Dashboard() {
           <p className="text-gray-400 mt-1 text-sm">Acompanhe suas metas e eficiência.</p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
-           <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800 self-start">
-              {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
-                <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
-                  {t === 'DAY' ? 'Dia' : t === 'WEEK' ? 'Semana' : 'Mês'}
-                </button>
-              ))}
+        <div className="flex flex-col gap-3">
+           {/* SELETOR DE VEÍCULO */}
+           <div className="relative">
+              <Car className="absolute left-3 top-2.5 text-gray-500" size={16} />
+              <select 
+                value={selectedVehicleId}
+                onChange={(e) => setSelectedVehicleId(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-800 text-white rounded-xl py-2 pl-9 pr-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none appearance-none cursor-pointer hover:bg-gray-800 transition-colors"
+              >
+                {vehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
            </div>
-           <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
-              <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
-              <div className="flex items-center gap-2 px-4 min-w-[140px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
-              <button onClick={() => navigateDate('next')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronRight size={20} /></button>
+
+           <div className="flex gap-2">
+             <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800 self-start">
+                {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
+                  <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
+                    {t === 'DAY' ? 'Dia' : t === 'WEEK' ? 'Semana' : 'Mês'}
+                  </button>
+                ))}
+             </div>
+             <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
+                <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
+                <div className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
+                <button onClick={() => navigateDate('next')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronRight size={20} /></button>
+             </div>
            </div>
         </div>
       </header>
@@ -355,7 +398,7 @@ export default function Dashboard() {
             <Zap size={16} className="text-yellow-500"/> Eficiência Real & Operacional
         </h2>
         
-        {/* NOVOS CARDS DE CORRIDAS */}
+        {/* CARDS DE CORRIDAS */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
           <SmartCard 
             title="Corridas" 
