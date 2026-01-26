@@ -1,23 +1,39 @@
 // app/types/models.ts
 
-import { Platform, ExpenseCategory, FuelType, VehicleType } from "./enums";
+import { Platform, ExpenseCategory, FuelType, VehicleType, TankType } from "./enums";
+
+// === NOVA INTERFACE DE TANQUE (Fase 1) ===
+// Permite definir se o tanque é Líquido (L), Cilindro (m³) ou Bateria (kWh)
+export interface VehicleTank {
+  type: TankType;
+  fuelTypes: FuelType[]; // Ex: [GASOLINE, ETHANOL] para flex, ou [CNG] para GNV
+  capacity: number;      // Capacidade total
+  unit: 'L' | 'm3' | 'kWh'; // Unidade de medida
+}
 
 export interface Vehicle {
   id: string;
   userId: string;
-  name: string;
   
-  // === TIPO DO VEÍCULO (Novo) ===
-  type?: VehicleType; 
-  // ==============================
+  // Identidade do Veículo
+  name: string;   // Apelido (ex: "O Azulão")
+  brand: string;  // Marca (ex: Fiat)
+  model: string;  // Modelo (ex: Mobi Easy)
+  
+  // Classificação
+  type: VehicleType; // Usando o novo Enum expandido (SUV, VAN, etc.)
 
-  // === Detalhes do Veículo ===
-  brand?: string;       // Marca (Ex: Fiat)
-  model?: string;       // Modelo (Ex: Mobi)
-  year?: number;        // Ano
-  licensePlate?: string;// Placa
-  // ===========================
+  // Configuração Técnica (O Coração da Fase 1)
+  year: number;
+  tanks: VehicleTank[]; // <--- Array de tanques: Suporte a GNV + Líquido
 
+  // Dados Burocráticos (Novos Campos Opcionais)
+  licensePlate: string;
+  vin?: string;       // Chassi
+  renavam?: string;   // Renavam
+  notes?: string;     // Observações gerais
+
+  // Controle
   currentOdometer: number;
   createdAt?: string;
   updatedAt?: string;
@@ -36,7 +52,7 @@ export interface BaseTransaction {
 
 export interface IncomeTransaction extends BaseTransaction {
   type: 'INCOME';
-  platform: Platform;
+  platform: Platform; // Uber, 99, Rappi, etc.
   distanceDriven: number;
   onlineDurationMinutes: number;
   tripsCount: number;
@@ -46,13 +62,13 @@ export interface IncomeTransaction extends BaseTransaction {
 export interface ExpenseTransaction extends BaseTransaction {
   type: 'EXPENSE';
   category: ExpenseCategory;
-  isFixedCost: boolean; // se é custo fixo (seguro, ipva) ou variável
+  isFixedCost: boolean; // Custo fixo (seguro) ou variável (combustível)
   
-  // Campos específicos de combustível
-  fuelType?: FuelType;
-  liters?: number;
-  pricePerLiter?: number;
-  fullTank?: boolean;
+  // Campos específicos de abastecimento
+  fuelType?: FuelType; // <--- Qual combustível foi usado NESTE abastecimento (Fundamental para média correta)
+  liters?: number;     // Quantidade (Litros, m³ ou kWh)
+  pricePerLiter?: number; // Preço unitário
+  fullTank?: boolean;  // Se encheu o tanque (reset de média)
   stationName?: string;
 }
 
@@ -65,7 +81,15 @@ export interface Goal {
   targetAmount: number; // em centavos
   currentAmount: number; // em centavos
   deadline?: string;
-  icon?: string; // identificador do ícone
-  color?: string; // hex code
+  
+  // Detalhes Visuais
+  icon?: string; 
+  color?: string; 
+  
+  // Novos Campos de Gestão (Roadmap)
+  purpose?: string;     // Ex: Aposentadoria, Troca de Carro
+  description?: string;
+  status?: 'ACTIVE' | 'COMPLETED';
+  
   createdAt: string;
 }

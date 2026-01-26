@@ -1,15 +1,17 @@
 // app/routes/despesas.tsx
+
 import { useEffect, useState } from "react";
 import { collection, addDoc, query, where, orderBy, limit, onSnapshot, updateDoc, doc, deleteDoc } from "firebase/firestore";
 import { 
   Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, 
-  AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign 
+  AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign, 
+  Flame, Zap, Info
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
-import { ExpenseCategory, FuelType } from "~/types/enums";
+import { ExpenseCategory, FuelType, TankType } from "~/types/enums";
 import type { Vehicle } from "~/types/models";
 
-// === COMPONENTES DE MODAL ===
+// === COMPONENTES DE MODAL (MANTIDOS IGUAIS) ===
 
 function SuccessModal({ isOpen, onClose, title, message }: any) {
   if (!isOpen) return null;
@@ -22,10 +24,7 @@ function SuccessModal({ isOpen, onClose, title, message }: any) {
           </div>
           <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
           <p className="text-gray-400 mb-6">{message}</p>
-          <button 
-            onClick={onClose}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-colors"
-          >
+          <button onClick={onClose} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-colors">
             OK, continuar
           </button>
         </div>
@@ -57,7 +56,7 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-// === NOVO MODAL DE DETALHES E EDIÇÃO (DESPESAS) ===
+// === NOVO MODAL DE DETALHES (ATUALIZADO PARA SUPORTAR NOVOS COMBUSTÍVEIS) ===
 function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
@@ -69,13 +68,12 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
         amount: (transaction.amount / 100).toFixed(2),
         date: new Date(transaction.date).toLocaleDateString('en-CA'),
         odometer: transaction.odometer || 0,
-        // Campos de Combustível
         liters: transaction.liters || 0,
         pricePerLiter: transaction.pricePerLiter || 0,
         stationName: transaction.stationName || "",
-        // Campos Gerais
         description: transaction.description || "",
-        category: transaction.category || ""
+        category: transaction.category || "",
+        fuelType: transaction.fuelType || FuelType.GASOLINE // Novo campo
       });
       setIsEditing(false);
     }
@@ -98,9 +96,9 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
          updates.liters = Number(formData.liters);
          updates.pricePerLiter = Number(formData.pricePerLiter);
          updates.stationName = formData.stationName;
+         // updates.fuelType = formData.fuelType; // Opcional: permitir trocar combustível na edição
       } else {
          updates.description = formData.description;
-         // updates.category = formData.category; // Opcional: permitir trocar categoria
       }
 
       await onUpdate(transaction.id, updates);
@@ -117,11 +115,9 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
     <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
       <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
       <input 
-        type={type} 
-        step={step}
-        value={formData[field]} 
-        onChange={e => setFormData({...formData, [field]: e.target.value})}
-        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
+        type={type} step={step}
+        value={formData[field]} onChange={e => setFormData({...formData, [field]: e.target.value})}
+        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         placeholder={placeholder}
       />
     </div>
@@ -140,74 +136,49 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        
-        {/* HEADER */}
         <div className={`p-6 pb-8 relative ${isFuel ? 'bg-yellow-500/10' : 'bg-blue-500/10'}`}>
-           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors">
-              <X size={20} />
-           </button>
-           
+           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors"><X size={20} /></button>
            <div className="flex flex-col items-center">
               <div className={`w-16 h-16 rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4 ${isFuel ? 'bg-yellow-500 text-black' : 'bg-blue-600 text-white'}`}>
                  {isFuel ? <Fuel size={32} /> : <Wrench size={32} />}
               </div>
-              <h2 className="text-2xl font-bold text-white">
-                {isFuel ? 'Abastecimento' : 'Despesa / Serviço'}
-              </h2>
+              <h2 className="text-2xl font-bold text-white">{isFuel ? 'Abastecimento' : 'Despesa'}</h2>
               <div className="text-sm font-medium text-gray-400 opacity-80 uppercase tracking-wider">
-                 {isFuel ? 'Combustível' : (transaction.category === 'MAINTENANCE' ? 'Manutenção' : transaction.category)}
+                 {isFuel ? (transaction.fuelType || 'Combustível') : (transaction.category === 'MAINTENANCE' ? 'Manutenção' : transaction.category)}
               </div>
            </div>
         </div>
 
-        {/* BODY */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
            {isEditing ? (
               <div className="grid grid-cols-2 gap-3">
-                 <div className="col-span-2">
-                    <InputField label="Valor (R$)" field="amount" step="0.01" />
-                 </div>
-                 <div className="col-span-2">
-                    <InputField label="Data" field="date" type="date" />
-                 </div>
-                 <div className="col-span-2">
-                    <InputField label="Odômetro (KM)" field="odometer" />
-                 </div>
-
+                 <div className="col-span-2"><InputField label="Valor (R$)" field="amount" step="0.01" /></div>
+                 <div className="col-span-2"><InputField label="Data" field="date" type="date" /></div>
+                 <div className="col-span-2"><InputField label="Odômetro (KM)" field="odometer" /></div>
                  {isFuel ? (
                     <>
-                       <InputField label="Litros" field="liters" step="0.001" />
-                       <InputField label="Preço/Litro" field="pricePerLiter" step="0.001" />
-                       <div className="col-span-2">
-                          <InputField label="Nome do Posto" field="stationName" type="text" />
-                       </div>
+                       <InputField label="Quantidade" field="liters" step="0.001" />
+                       <InputField label="Preço Unitário" field="pricePerLiter" step="0.001" />
+                       <div className="col-span-2"><InputField label="Nome do Posto" field="stationName" type="text" /></div>
                     </>
                  ) : (
-                    <div className="col-span-2">
-                       <InputField label="Descrição / Serviço" field="description" type="text" />
-                    </div>
+                    <div className="col-span-2"><InputField label="Descrição" field="description" type="text" /></div>
                  )}
               </div>
            ) : (
               <div className="space-y-3">
                  <div className="text-center mb-6">
-                    <span className="text-4xl font-bold text-emerald-400">
-                       {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
-                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
-                       <Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}
-                    </p>
+                    <span className="text-4xl font-bold text-emerald-400">{(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1"><Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}</p>
                  </div>
-
                  <div className="grid grid-cols-1 gap-3">
                     <DisplayField label="Odômetro" value={`${formData.odometer ? formData.odometer + ' km' : 'Não informado'}`} icon={Gauge} color="text-emerald-500" />
-                    
                     {isFuel ? (
                        <>
                           <DisplayField label="Posto" value={formData.stationName} icon={MapPin} color="text-red-400" />
                           <div className="grid grid-cols-2 gap-3">
-                             <DisplayField label="Litros" value={`${Number(formData.liters).toFixed(1)} L`} icon={Droplets} color="text-blue-400" />
-                             <DisplayField label="Preço/L" value={`R$ ${Number(formData.pricePerLiter).toFixed(2)}`} icon={DollarSign} color="text-green-400" />
+                             <DisplayField label="Qtd." value={`${Number(formData.liters).toFixed(3)} ${transaction.fuelType === FuelType.CNG ? 'm³' : transaction.fuelType === FuelType.ELECTRIC ? 'kWh' : 'L'}`} icon={Droplets} color="text-blue-400" />
+                             <DisplayField label="Unitário" value={`R$ ${Number(formData.pricePerLiter).toFixed(2)}`} icon={DollarSign} color="text-green-400" />
                           </div>
                        </>
                     ) : (
@@ -218,34 +189,16 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
            )}
         </div>
 
-        {/* FOOTER */}
         <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex gap-3">
            {isEditing ? (
              <>
-               <button 
-                 onClick={() => setIsEditing(false)}
-                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors"
-               >
-                 Cancelar
-               </button>
-               <button 
-                 onClick={handleSave}
-                 disabled={saving}
-                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
-               >
-                 {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
-               </button>
+               <button onClick={() => setIsEditing(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
+               <button onClick={handleSave} disabled={saving} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2">{saving ? "Salvando..." : <><Save size={18}/> Salvar</>}</button>
              </>
            ) : (
-             <button 
-               onClick={() => setIsEditing(true)}
-               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"
-             >
-               <Pencil size={18} /> Editar Despesa
-             </button>
+             <button onClick={() => setIsEditing(true)} className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"><Pencil size={18} /> Editar</button>
            )}
         </div>
-
       </div>
     </div>
   );
@@ -263,8 +216,6 @@ export default function DespesasPage() {
   // Estados de Modal
   const [showSuccess, setShowSuccess] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  
-  // ESTADO PARA O MODAL DE DETALHES
   const [selectedExpense, setSelectedExpense] = useState<any | null>(null);
 
   // Estados Comuns
@@ -284,6 +235,24 @@ export default function DespesasPage() {
   // Estados Específicos Gerais
   const [category, setCategory] = useState<ExpenseCategory>(ExpenseCategory.MAINTENANCE);
 
+  // Helpers de Unidade
+  const getUnit = () => {
+      if (fuelType === FuelType.CNG) return 'm³';
+      if (fuelType === FuelType.ELECTRIC) return 'kWh';
+      return 'Litros';
+  };
+
+  const translateFuel = (f: FuelType) => {
+      switch (f) {
+          case FuelType.GASOLINE: return "Gasolina";
+          case FuelType.ETHANOL: return "Etanol";
+          case FuelType.DIESEL: return "Diesel";
+          case FuelType.CNG: return "GNV";
+          case FuelType.ELECTRIC: return "Elétrico";
+          default: return f;
+      }
+  };
+
   // Carregar Dados
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -295,7 +264,12 @@ export default function DespesasPage() {
       setVehicles(data);
       if (data.length > 0 && !selectedVehicle) {
         setSelectedVehicle(data[0].id);
-        if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer)); 
+        if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer));
+        
+        // Seleciona o primeiro combustível do primeiro tanque como padrão
+        if (data[0].tanks && data[0].tanks.length > 0) {
+            setFuelType(data[0].tanks[0].fuelTypes[0]);
+        }
       }
     });
 
@@ -316,16 +290,20 @@ export default function DespesasPage() {
     return () => { unsubVehicles(); unsubExpenses(); };
   }, []);
 
+  // Atualiza odômetro e combustível ao trocar veículo
   useEffect(() => {
     const vehicle = vehicles.find(v => v.id === selectedVehicle);
-    if (vehicle) setOdometer(String(vehicle.currentOdometer || ""));
+    if (vehicle) {
+        setOdometer(String(vehicle.currentOdometer || ""));
+        // Reseta o tipo de combustível para o primeiro disponível no carro novo
+        if (vehicle.tanks && vehicle.tanks.length > 0) {
+            setFuelType(vehicle.tanks[0].fuelTypes[0]);
+        }
+    }
   }, [selectedVehicle, vehicles]);
 
-  // === HELPER PARA BLOQUEAR NEGATIVOS ===
   const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (["-", "e"].includes(e.key)) {
-      e.preventDefault();
-    }
+    if (["-", "e"].includes(e.key)) e.preventDefault();
   };
 
   // === CÁLCULOS ===
@@ -368,7 +346,7 @@ export default function DespesasPage() {
         await addDoc(collection(db, "transactions"), {
           ...baseData,
           category: ExpenseCategory.FUEL,
-          fuelType,
+          fuelType, // Salva se foi GNV, Gasolina, etc.
           liters: Number(liters),
           pricePerLiter: Number(pricePerLiter),
           fullTank,
@@ -382,12 +360,24 @@ export default function DespesasPage() {
         });
       }
 
+      // ATUALIZAÇÃO DO VEÍCULO (Com integridade de data)
       const currentCar = vehicles.find(v => v.id === selectedVehicle);
       if (currentCar && currentOdometerValue > (currentCar.currentOdometer || 0)) {
-        await updateDoc(doc(db, "vehicles", selectedVehicle), { 
+        const updateData: any = { 
             currentOdometer: currentOdometerValue,
             updatedAt: new Date().toISOString()
-        });
+        };
+        // Se a data do lançamento for HOJE ou FUTURO, atualiza a data de referência do odômetro
+        // Se for retroativo, NÃO atualiza a lastOdometerDate para não quebrar a lógica de "última leitura real"
+        const launchDate = new Date(`${date}T00:00:00`);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+
+        if (launchDate >= today) {
+            updateData.lastOdometerDate = new Date().toISOString();
+        }
+
+        await updateDoc(doc(db, "vehicles", selectedVehicle), updateData);
       }
 
       setSaving(false);
@@ -407,13 +397,13 @@ export default function DespesasPage() {
   };
 
   const handleUpdateExpense = async (id: string, data: any) => {
-    try {
-       const ref = doc(db, "transactions", id);
-       await updateDoc(ref, data);
-    } catch (error) {
-       throw error;
-    }
- };
+     try {
+        const ref = doc(db, "transactions", id);
+        await updateDoc(ref, data);
+     } catch (error) {
+        throw error;
+     }
+  };
 
   const handleDelete = async () => {
     if (deleteId) {
@@ -430,28 +420,9 @@ export default function DespesasPage() {
     <div>
       <h1 className="text-3xl font-bold text-white mb-6">Registrar Despesas</h1>
       
-      {/* MODAIS */}
-      <SuccessModal 
-        isOpen={showSuccess} 
-        onClose={() => setShowSuccess(false)} 
-        title="Salvo com Sucesso!" 
-        message="A despesa foi registrada e a quilometragem do veículo atualizada."
-      />
-      
-      <ConfirmModal 
-        isOpen={!!deleteId} 
-        onClose={() => setDeleteId(null)}
-        onConfirm={handleDelete}
-        title="Excluir Despesa?"
-        message="Essa ação não pode ser desfeita e removerá o registro do cálculo financeiro."
-      />
-
-      <ExpenseDetailsModal
-        isOpen={!!selectedExpense}
-        transaction={selectedExpense}
-        onClose={() => setSelectedExpense(null)}
-        onUpdate={handleUpdateExpense}
-      />
+      <SuccessModal isOpen={showSuccess} onClose={() => setShowSuccess(false)} title="Salvo com Sucesso!" message="A despesa foi registrada e a quilometragem atualizada." />
+      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete} title="Excluir Despesa?" message="Essa ação não pode ser desfeita." />
+      <ExpenseDetailsModal isOpen={!!selectedExpense} transaction={selectedExpense} onClose={() => setSelectedExpense(null)} onUpdate={handleUpdateExpense} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
@@ -461,39 +432,23 @@ export default function DespesasPage() {
             
             {/* ABAS */}
             <div className="flex border-b border-gray-800">
-              <button 
-                onClick={() => setActiveTab('FUEL')}
-                className={`flex-1 py-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
-                  activeTab === 'FUEL' ? 'bg-gray-800 text-emerald-400 border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
-              >
+              <button onClick={() => setActiveTab('FUEL')} className={`flex-1 py-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === 'FUEL' ? 'bg-gray-800 text-emerald-400 border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
                 <Fuel size={18} /> Abastecimento
               </button>
-              <button 
-                onClick={() => setActiveTab('GENERAL')}
-                className={`flex-1 py-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
-                  activeTab === 'GENERAL' ? 'bg-gray-800 text-emerald-400 border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
-              >
+              <button onClick={() => setActiveTab('GENERAL')} className={`flex-1 py-4 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === 'GENERAL' ? 'bg-gray-800 text-emerald-400 border-b-2 border-emerald-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
                 <Wrench size={18} /> Manutenção
               </button>
             </div>
 
             <div className="p-6">
               {vehicles.length === 0 ? (
-                <div className="text-center p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
-                  <p className="text-sm text-red-400">Cadastre um veículo primeiro.</p>
-                </div>
+                <div className="text-center p-4 bg-red-500/10 border border-red-500/20 rounded-lg"><p className="text-sm text-red-400">Cadastre um veículo primeiro.</p></div>
               ) : (
                 <form onSubmit={handleSave} className="space-y-4">
                   
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide font-bold">Veículo</label>
-                    <select 
-                      value={selectedVehicle}
-                      onChange={e => setSelectedVehicle(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                    >
+                    <select value={selectedVehicle} onChange={e => setSelectedVehicle(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none">
                       {vehicles.map(v => (
                         <option key={v.id} value={v.id}>{v.name} - {v.currentOdometer}km</option>
                       ))}
@@ -502,74 +457,74 @@ export default function DespesasPage() {
 
                   {activeTab === 'FUEL' ? (
                     <>
-                      {/* === ABASTECIMENTO === */}
+                      {/* SELETOR DE COMBUSTÍVEL INTELIGENTE */}
+                      <div className="mb-2">
+                         <label className="block text-xs text-gray-500 mb-2 font-bold uppercase">Qual Combustível?</label>
+                         <div className="flex flex-wrap gap-2">
+                            {(() => {
+                                const v = vehicles.find(veh => veh.id === selectedVehicle);
+                                if (!v || !v.tanks) return <span className="text-gray-500 text-sm">Selecione um veículo</span>;
+                                
+                                const allFuels = Array.from(new Set(v.tanks.flatMap(t => t.fuelTypes)));
+
+                                return allFuels.map(f => (
+                                    <button
+                                        key={f}
+                                        type="button"
+                                        onClick={() => setFuelType(f)}
+                                        className={`flex-1 min-w-[80px] py-3 rounded-xl border font-bold text-sm transition-all relative overflow-hidden ${
+                                            fuelType === f 
+                                            ? (f === FuelType.ETHANOL ? 'bg-emerald-600 border-emerald-500 text-white' 
+                                                : f === FuelType.GASOLINE ? 'bg-red-600 border-red-500 text-white'
+                                                : f === FuelType.CNG ? 'bg-blue-600 border-blue-500 text-white'
+                                                : 'bg-yellow-600 border-yellow-500 text-white')
+                                            : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        {translateFuel(f)}
+                                        {fuelType === f && <div className="absolute inset-0 bg-white/10 animate-pulse"></div>}
+                                    </button>
+                                ));
+                            })()}
+                         </div>
+                      </div>
+
+                      {/* INPUTS DE ABASTECIMENTO */}
                       <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-4">
-                        
                         <div>
-                          <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1">
-                            <MapPin size={12} className="text-emerald-500"/> Posto de Combustível
-                          </label>
-                          <input 
-                            value={stationName}
-                            onChange={e => setStationName(e.target.value)}
-                            placeholder="Ex: Posto Ipiranga Centro"
-                            className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white placeholder-gray-500 focus:border-emerald-500 outline-none transition-colors"
-                          />
+                          <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1"><MapPin size={12} className="text-emerald-500"/> Posto / Estação</label>
+                          <input value={stationName} onChange={e => setStationName(e.target.value)} placeholder="Ex: Posto Ipiranga" className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white placeholder-gray-500 focus:border-emerald-500 outline-none transition-colors" />
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-emerald-400 mb-1 font-bold">Preço/Litro</label>
-                            <input 
-                              type="number" step="0.01" required min="0"
-                              value={pricePerLiter} 
-                              onChange={e => handlePriceChange(e.target.value)} 
-                              onKeyDown={preventNegativeInput}
-                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="0.00"
-                            />
+                            <label className="block text-xs text-emerald-400 mb-1 font-bold">Preço / {getUnit().replace('Litros', 'L')}</label>
+                            <input type="number" step="0.001" required min="0" value={pricePerLiter} onChange={e => handlePriceChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0.00" />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-400 mb-1">Total (R$)</label>
-                            <input 
-                              type="number" step="0.01" min="0"
-                              value={amount} 
-                              onChange={e => handleAmountChange(e.target.value)} 
-                              onKeyDown={preventNegativeInput}
-                              className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              placeholder="0.00"
-                            />
+                            <input type="number" step="0.01" min="0" value={amount} onChange={e => handleAmountChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0.00" />
                           </div>
                         </div>
                         
                         <div className="relative">
-                           <input 
-                              type="number" step="0.001" required min="0"
-                              value={liters} 
-                              onChange={e => handleLitersChange(e.target.value)} 
-                              onKeyDown={preventNegativeInput}
-                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <span className="absolute left-3 top-2 text-xs text-gray-500 uppercase font-bold tracking-wider">Litros</span>
+                            <input type="number" step="0.001" required min="0" value={liters} onChange={e => handleLitersChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            <span className="absolute left-3 top-2 text-xs text-gray-500 uppercase font-bold tracking-wider">{getUnit()}</span>
                         </div>
                       </div>
 
-                      {/* Odômetro na aba Fuel */}
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (KM Total)</label>
-                        <input 
-                          type="number" required min="0"
-                          value={odometer} onChange={e => setOdometer(e.target.value)} 
-                          onKeyDown={preventNegativeInput}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
+                        <input type="number" required min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                       </div>
 
                       <div className="flex items-center gap-3 py-2 bg-gray-800/30 p-2 rounded-lg cursor-pointer" onClick={() => setFullTank(!fullTank)}>
                           <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${fullTank ? 'bg-emerald-500 border-emerald-500' : 'border-gray-600'}`}>
                              {fullTank && <CheckCircle size={14} className="text-white" />}
                           </div>
-                          <label className="text-sm text-gray-300 cursor-pointer select-none">Encheu o tanque? (Resetar média)</label>
+                          <label className="text-sm text-gray-300 cursor-pointer select-none">
+                              {fuelType === FuelType.ELECTRIC ? 'Carga Completa (100%)' : 'Tanque Cheio (Resetar média)'}
+                          </label>
                       </div>
                     </>
                   ) : (
@@ -594,26 +549,12 @@ export default function DespesasPage() {
 
                       <div>
                           <label className="block text-xs text-emerald-500 mb-1 font-bold">Valor (R$)</label>
-                          <input 
-                            type="number" step="0.01" required min="0"
-                            value={amount} onChange={e => setAmount(e.target.value)} 
-                            onKeyDown={preventNegativeInput}
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
+                          <input type="number" step="0.01" required min="0" value={amount} onChange={e => setAmount(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                       </div>
 
-                      {/* Odômetro na aba Geral */}
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (Opcional)</label>
-                        <input 
-                            type="number" min="0"
-                            value={odometer} 
-                            onChange={e => setOdometer(e.target.value)} 
-                            onKeyDown={preventNegativeInput}
-                            placeholder="KM no momento do serviço"
-                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <p className="text-[10px] text-gray-500 mt-1">Informe se deseja atualizar a KM do veículo.</p>
+                        <input type="number" min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} placeholder="KM no momento do serviço" className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                       </div>
                     </>
                   )}
@@ -640,63 +581,41 @@ export default function DespesasPage() {
 
           <div className="space-y-3">
             {recentExpenses.map((exp) => (
-              <div 
-                key={exp.id} 
-                onClick={() => setSelectedExpense(exp)}
-                className="group bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center hover:border-emerald-500/30 transition-all hover:bg-gray-800/50 cursor-pointer"
-              >
+              <div key={exp.id} onClick={() => setSelectedExpense(exp)} className="group bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center hover:border-emerald-500/30 transition-all hover:bg-gray-800/50 cursor-pointer">
                 <div className="flex items-center gap-4">
                   <div className={`h-12 w-12 rounded-xl flex items-center justify-center border border-opacity-10 ${exp.category === 'FUEL' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500' : 'bg-blue-500/10 text-blue-500 border-blue-500'}`}>
-                    {exp.category === 'FUEL' ? <Fuel size={20}/> : <Wrench size={20}/>}
+                    {exp.category === 'FUEL' ? (
+                        exp.fuelType === FuelType.CNG ? <Flame size={20}/> : 
+                        exp.fuelType === FuelType.ELECTRIC ? <Zap size={20}/> : 
+                        <Fuel size={20}/>
+                    ) : <Wrench size={20}/>}
                   </div>
                   <div>
-                    <p className="font-bold text-white text-lg flex items-center gap-2">
-                       {formatMoney(exp.amount)}
-                       <ExternalLink size={12} className="opacity-0 group-hover:opacity-50 text-gray-400" />
-                    </p>
+                    <p className="font-bold text-white text-lg flex items-center gap-2">{formatMoney(exp.amount)}</p>
                     <p className="text-sm text-gray-400 capitalize flex items-center gap-2">
-                      {exp.category === 'FUEL' 
-                        ? (
+                      {exp.category === 'FUEL' ? (
                             <>
+                                <span className="text-gray-300 font-bold bg-gray-800 px-1 rounded text-[10px] uppercase">{translateFuel(exp.fuelType)}</span>
                                 <span className="text-gray-300">{exp.stationName || 'Posto'}</span>
                                 <span className="text-gray-600">•</span>
-                                <span>{Number(exp.liters).toFixed(1)}L</span>
+                                <span>{Number(exp.liters).toFixed(1)}{exp.fuelType === FuelType.CNG ? 'm³' : 'L'}</span>
                             </>
-                          ) 
-                        : (exp.description || exp.category)}
+                          ) : (exp.description || exp.category)}
                     </p>
                   </div>
                 </div>
                 
                 <div className="flex items-center gap-4">
                   <div className="text-right hidden sm:block">
-                    <span className="text-xs text-gray-500 flex items-center gap-1 justify-end">
-                      <Calendar size={12}/> {new Date(exp.date).toLocaleDateString('pt-BR')}
-                    </span>
-                    {exp.odometer && (
-                        <span className="text-xs text-emerald-500/70 block mt-1 font-mono">
-                           {exp.odometer} km
-                        </span>
-                    )}
+                    <span className="text-xs text-gray-500 flex items-center gap-1 justify-end"><Calendar size={12}/> {new Date(exp.date).toLocaleDateString('pt-BR')}</span>
+                    {exp.odometer && <span className="text-xs text-emerald-500/70 block mt-1 font-mono">{exp.odometer} km</span>}
                   </div>
-                  
-                  <button 
-                    onClick={(e) => {
-                       e.stopPropagation();
-                       setDeleteId(exp.id);
-                    }}
-                    className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
-                    title="Excluir registro"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteId(exp.id); }} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10" title="Excluir registro"><Trash2 size={18} /></button>
                 </div>
               </div>
             ))}
              {recentExpenses.length === 0 && !loading && (
-                <div className="p-8 border border-dashed border-gray-800 rounded-xl text-center">
-                    <p className="text-gray-500">Nenhuma despesa registrada.</p>
-                </div>
+                <div className="p-8 border border-dashed border-gray-800 rounded-xl text-center"><p className="text-gray-500">Nenhuma despesa registrada.</p></div>
              )}
           </div>
         </div>
