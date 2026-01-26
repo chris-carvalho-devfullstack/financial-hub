@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { 
-  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc 
+  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs 
 } from "firebase/firestore"; 
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
   LayoutGrid, ChevronUp, Trash2, Gauge,
   AlertTriangle, Navigation, FileText,
-  Pencil, X, Save, Calendar, ExternalLink
+  Pencil, X, Save, Calendar, ExternalLink,
+  Info // <--- IMPORTADO NOVO ÍCONE
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
@@ -294,6 +295,7 @@ export default function GanhosPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [lastFuelPrice, setLastFuelPrice] = useState(0); // <--- NOVO ESTADO
   
   // ESTADO PARA O MODAL DE DETALHES
   const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransaction | null>(null);
@@ -314,6 +316,7 @@ export default function GanhosPage() {
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
+  // === BUSCAR VEÍCULOS E TRANSAÇÕES ===
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
       if (user) {
@@ -343,6 +346,34 @@ export default function GanhosPage() {
     return () => unsub && unsub();
   }, []);
 
+  // === BUSCAR ÚLTIMO PREÇO DE COMBUSTÍVEL DO VEÍCULO SELECIONADO ===
+  useEffect(() => {
+    if (!selectedVehicle) return;
+    
+    const fetchLastPrice = async () => {
+      // Busca a última despesa de COMBUSTÍVEL desse carro para referência
+      // (Mantivemos a versão padrão pois você já criou os índices)
+      const q = query(
+        collection(db, "transactions"),
+        where("vehicleId", "==", selectedVehicle),
+        where("category", "==", "FUEL"), 
+        orderBy("date", "desc"),
+        limit(1)
+      );
+      
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setLastFuelPrice(data.pricePerLiter || 0);
+      } else {
+        setLastFuelPrice(0);
+      }
+    };
+  
+    fetchLastPrice();
+  }, [selectedVehicle]);
+
+  // === SINCRONIZA ODÔMETRO INICIAL QUANDO TROCA DE VEÍCULO ===
   useEffect(() => {
       if (selectedVehicle && vehicles.length > 0) {
           const v = vehicles.find(vec => vec.id === selectedVehicle);
@@ -360,6 +391,18 @@ export default function GanhosPage() {
       e.preventDefault();
     }
   };
+
+  // === CÁLCULOS EM TEMPO REAL (Monitor de Eficiência) ===
+  const tripKm = parseFloat(distance) || 0;
+  const panelAvg = parseFloat(clusterAvg) || 0;
+  
+  // (Trip / Média Painel) * Preço Combustível
+  const estimatedCost = (panelAvg > 0 && lastFuelPrice > 0) 
+     ? (tripKm / panelAvg) * lastFuelPrice 
+     : 0;
+  
+  const currentIncome = parseFloat(amount.replace(',', '.')) || 0;
+  const estimatedProfit = currentIncome - estimatedCost;
 
   // === AÇÕES ===
 
@@ -397,8 +440,11 @@ export default function GanhosPage() {
 
       if (finalOdometer > startOdometer) {
          const vehicleRef = doc(db, "vehicles", selectedVehicle);
+         // CORREÇÃO DE INTEGRIDADE: Atualiza data de referência do odômetro
          await updateDoc(vehicleRef, {
-            currentOdometer: finalOdometer
+            currentOdometer: finalOdometer,
+            lastOdometerDate: new Date(`${date}T12:00:00`).toISOString(),
+            updatedAt: new Date().toISOString()
          });
       }
 
@@ -421,8 +467,6 @@ export default function GanhosPage() {
      try {
         const ref = doc(db, "transactions", id);
         await updateDoc(ref, data);
-        // Não vamos atualizar o odômetro do veículo aqui para evitar inconsistências em edições retroativas,
-        // mas o usuário pode ajustar manualmente no formulário principal se necessário.
      } catch (error) {
         throw error;
      }
@@ -650,6 +694,58 @@ export default function GanhosPage() {
                    </div>
                 </div>
             </div>
+
+            {/* === MONITOR DE EFICIÊNCIA OPERACIONAL === */}
+            {(tripKm > 0 && panelAvg > 0) && (
+              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center gap-2 mb-3">
+                    <h4 className="text-gray-400 text-xs font-bold uppercase flex items-center gap-2">
+                        <Zap size={14} className="text-yellow-500"/> Análise da Trip (Estimada)
+                    </h4>
+                    {/* TOOLTIP DE AJUDA */}
+                    <div className="relative group">
+                        <Info size={14} className="text-gray-500 cursor-help" />
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 border border-gray-700 rounded-lg text-[10px] text-gray-300 text-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50">
+                             Estimativa baseada na Trip e média do painel. A média real (bomba) está no Dashboard.
+                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-700"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4 text-center divide-x divide-gray-700">
+                  
+                  {/* 1. O Custo Calculado */}
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase">Custo Comb.</p>
+                    <p className="text-red-400 font-bold text-lg">
+                       {estimatedCost.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                    </p>
+                    {lastFuelPrice > 0 ? (
+                        <p className="text-[9px] text-gray-600">Base: R${lastFuelPrice.toFixed(2)}/un</p>
+                    ) : (
+                        <p className="text-[9px] text-yellow-600">Sem ref. de preço</p>
+                    )}
+                  </div>
+
+                  {/* 2. O Lucro Real Aproximado */}
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase">Lucro Líquido</p>
+                    <p className={`font-bold text-lg ${estimatedProfit > 0 ? 'text-emerald-400' : 'text-red-500'}`}>
+                       {estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                    </p>
+                  </div>
+
+                  {/* 3. Eficiência (R$/km) */}
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase">Custo/KM</p>
+                    <p className="text-yellow-500 font-bold text-lg">
+                       {((estimatedCost / tripKm) || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                    </p>
+                  </div>
+                  
+                </div>
+              </div>
+            )}
 
             <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-base md:text-lg h-14 md:h-16">
               {saving ? "Salvando..." : <><DollarSign size={20} /> Confirmar Lançamento</>}
