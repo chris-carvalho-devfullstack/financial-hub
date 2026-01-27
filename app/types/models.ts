@@ -102,3 +102,10 @@ export interface Goal {
   
   createdAt: string;
 }
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  lastSelectedVehicleId?: string; // <--- O campo que guarda a preferência
+  createdAt?: string;
+}

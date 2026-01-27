@@ -1,13 +1,17 @@
 // app/routes/dashboard.tsx
 
 import { useEffect, useState } from "react";
-import { collection, query, where, onSnapshot, orderBy, limit, getDocs } from "firebase/firestore";
+import { 
+  collection, query, where, onSnapshot, orderBy, limit, getDocs, 
+  doc, setDoc // <--- ADICIONADO: Para persistência
+} from "firebase/firestore";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign, Car
+  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign, Car,
+  ChevronDown // <--- ADICIONADO: Ícone do menu
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 // CORREÇÃO 1: Removido FuelTransaction da importação, pois não existe no models.ts
@@ -17,6 +21,14 @@ import { OdometerChart } from "~/components/OdometerChart";
 
 // Tipos
 type TimeFilter = 'DAY' | 'WEEK' | 'MONTH';
+
+// === HELPER: LOGO DO VEÍCULO (NOVO) ===
+const getBrandLogo = (brand: string) => {
+  if (!brand) return "/logos/brands/generic.png";
+  // Normaliza o nome para bater com os arquivos (ex: "Fiat" -> "fiat")
+  const safeBrand = brand.toLowerCase().trim().replace(/\s+/g, '-');
+  return `/logos/brands/${safeBrand}.png`;
+};
 
 // === HELPER: DATA ===
 const getStartEndDates = (date: Date, filter: TimeFilter) => {
@@ -94,6 +106,7 @@ function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = fals
 export default function Dashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
+  const [isVehicleMenuOpen, setIsVehicleMenuOpen] = useState(false); // <--- NOVO ESTADO
   
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -134,19 +147,56 @@ export default function Dashboard() {
     setCurrentDate(newDate);
   };
 
-  // 1. Carregar Veículos (Para o filtro)
+  // 1. Carregar Veículos (ATUALIZADO PARA PERSISTÊNCIA)
   useEffect(() => {
     if (!auth.currentUser) return;
-    const q = query(collection(db, "vehicles"), where("userId", "==", auth.currentUser.uid));
+    const userId = auth.currentUser.uid;
+
+    // A. Listener dos Veículos
+    const q = query(collection(db, "vehicles"), where("userId", "==", userId));
     const unsub = onSnapshot(q, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
       setVehicles(data);
+      
+      // Fallback: se não tiver nada selecionado, seleciona o primeiro
       if (data.length > 0 && !selectedVehicleId) {
         setSelectedVehicleId(data[0].id);
       }
     });
-    return () => unsub();
-  }, []);
+
+    // B. Listener da Preferência do Usuário (Firestore para persistência multi-device)
+    const userRef = doc(db, "users", userId);
+    const unsubUser = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        const savedId = userData.lastSelectedVehicleId;
+        if (savedId) {
+           setSelectedVehicleId(savedId);
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubUser();
+    };
+  }, []); // Dependências vazias
+
+  // Função para trocar veículo e SALVAR NO FIRESTORE (NOVA)
+  const handleChangeVehicle = async (id: string) => {
+    setSelectedVehicleId(id); // Atualiza UI instantaneamente
+    setIsVehicleMenuOpen(false); // Fecha menu
+
+    if (auth.currentUser) {
+      try {
+        const userRef = doc(db, "users", auth.currentUser.uid);
+        // Salva preferência (merge: true cria o doc se não existir)
+        await setDoc(userRef, { lastSelectedVehicleId: id }, { merge: true });
+      } catch (error) {
+        console.error("Erro ao salvar preferência:", error);
+      }
+    }
+  };
 
   // 2. Buscar último preço de combustível DO VEÍCULO SELECIONADO
   useEffect(() => {
@@ -323,44 +373,96 @@ export default function Dashboard() {
     return currentDate.toLocaleDateString('pt-BR', opts);
   };
 
+  // Encontra o objeto do veículo selecionado para exibir no botão
+  const currentVehicle = vehicles.find(v => v.id === selectedVehicleId);
+
   return (
     <div className="space-y-8 pb-24 animate-fade-in px-4 md:px-0">
       
-      {/* === HEADER === */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-4">
+      {/* === HEADER REESTRUTURADO === */}
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mt-4">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-2">Visão Geral</h1>
           <p className="text-gray-400 mt-1 text-sm">Acompanhe suas metas e eficiência.</p>
         </div>
 
-        <div className="flex flex-col gap-3">
-           {/* SELETOR DE VEÍCULO */}
-           <div className="relative">
-              <Car className="absolute left-3 top-2.5 text-gray-500" size={16} />
-              <select 
-                value={selectedVehicleId}
-                onChange={(e) => setSelectedVehicleId(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-800 text-white rounded-xl py-2 pl-9 pr-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none appearance-none cursor-pointer hover:bg-gray-800 transition-colors"
+        {/* ÁREA DE FILTROS E SELETOR NA MESMA LINHA */}
+        <div className="flex flex-wrap items-center gap-3">
+           
+           {/* === SELETOR DE VEÍCULO MODERNO (ATUALIZADO) === */}
+           <div className="relative z-50">
+              <button 
+                onClick={() => setIsVehicleMenuOpen(!isVehicleMenuOpen)}
+                className="flex items-center gap-3 bg-gray-900 border border-gray-800 hover:border-emerald-500/50 text-white rounded-xl py-2 px-4 transition-all shadow-lg min-w-[200px]"
               >
-                {vehicles.map(v => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
+                {currentVehicle ? (
+                  <>
+                    {/* LOGO DO VEÍCULO SELECIONADO (AUMENTADO w-10 h-10) */}
+                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center p-1 overflow-hidden shrink-0">
+                       <img 
+                         src={getBrandLogo(currentVehicle.brand)} 
+                         alt={currentVehicle.brand}
+                         onError={(e) => { e.currentTarget.src = "/logos/brands/generic.png" }} 
+                         className="w-full h-full object-contain"
+                       />
+                    </div>
+                    <div className="text-left flex-1 min-w-0">
+                       <p className="text-[10px] text-gray-400 font-bold uppercase leading-none mb-1 truncate">{currentVehicle.brand}</p>
+                       <p className="text-sm font-bold leading-none truncate">{currentVehicle.model}</p>
+                    </div>
+                    <ChevronDown size={18} className={`text-gray-500 transition-transform ${isVehicleMenuOpen ? 'rotate-180' : ''}`} />
+                  </>
+                ) : (
+                  <span className="text-sm text-gray-400">Carregando...</span>
+                )}
+              </button>
+
+              {/* DROPDOWN MENU */}
+              {isVehicleMenuOpen && (
+                <div className="absolute top-full left-0 mt-2 w-full min-w-[260px] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 z-[60]">
+                  <div className="py-2">
+                    {vehicles.map(v => (
+                      <button
+                        key={v.id}
+                        onClick={() => handleChangeVehicle(v.id)}
+                        className={`w-full flex items-center gap-4 px-4 py-3 hover:bg-gray-800 transition-colors ${selectedVehicleId === v.id ? 'bg-gray-800 border-l-4 border-emerald-500' : ''}`}
+                      >
+                         {/* LOGO NA LISTA (AUMENTADO w-12 h-12 E SEM FILTRO DE COR) */}
+                         <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center p-1 shrink-0 shadow-sm">
+                            <img 
+                                src={getBrandLogo(v.brand)} 
+                                alt={v.brand}
+                                className="w-full h-full object-contain" 
+                                // Removido filtro grayscale para cores reais
+                            />
+                         </div>
+                         <div className="text-left">
+                            <p className="text-white font-bold text-base">{v.name}</p>
+                            <p className="text-gray-500 text-xs uppercase font-medium">{v.brand} {v.model}</p>
+                         </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
            </div>
 
-           <div className="flex gap-2">
-             <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800 self-start">
-                {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
-                  <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
-                    {t === 'DAY' ? 'Dia' : t === 'WEEK' ? 'Semana' : 'Mês'}
-                  </button>
-                ))}
-             </div>
-             <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
-                <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
-                <div className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
-                <button onClick={() => navigateDate('next')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronRight size={20} /></button>
-             </div>
+           {/* DIVISOR VISUAL */}
+           <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
+
+           {/* FILTROS DE TEMPO (MANTIDOS ORIGINAIS) */}
+           <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800">
+              {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
+                <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
+                  {t === 'DAY' ? 'Dia' : t === 'WEEK' ? 'Semana' : 'Mês'}
+                </button>
+              ))}
+           </div>
+           
+           <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
+              <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
+              <div className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
+              <button onClick={() => navigateDate('next')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronRight size={20} /></button>
            </div>
         </div>
       </header>

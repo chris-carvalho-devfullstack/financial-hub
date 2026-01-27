@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { 
-  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs, increment 
+  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs, increment, setDoc
 } from "firebase/firestore"; 
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
@@ -235,7 +235,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
            
            <div className="flex flex-col items-center">
               <div className="w-16 h-16 bg-white rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4">
-                 {platformInfo.logo ? <img src={platformInfo.logo} className="w-full object-contain" /> : platformInfo.icon}
+                  {platformInfo.logo ? <img src={platformInfo.logo} className="w-full object-contain" /> : platformInfo.icon}
               </div>
               <h2 className={`text-2xl font-bold ${platformInfo.textColor === 'text-black' ? 'text-gray-900' : 'text-white'}`}>
                 {platformInfo.label}
@@ -374,33 +374,53 @@ export default function GanhosPage() {
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
-  // === 1. BUSCAR VEÍCULOS E METAS (Apenas uma vez ou quando mudar auth) ===
+  // === 1. BUSCAR VEÍCULOS, METAS E PREFERÊNCIA ===
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
+    const unsubAuth = auth.onAuthStateChanged((user) => {
       if (user) {
-        // Veículos
+        // A. Veículos
         const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-        onSnapshot(qVehicles, (snap) => {
+        const unsubVehicles = onSnapshot(qVehicles, (snap) => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
           setVehicles(data);
           
+          // Fallback: Se não tiver veículo selecionado, pega o primeiro da lista
           if (data.length > 0 && !selectedVehicle) {
              setSelectedVehicle(data[0].id);
           }
         });
 
-        // Metas Ativas (Carregamento solicitado)
+        // B. Preferência do Usuário (PERSISTÊNCIA)
+        const userRef = doc(db, "users", user.uid);
+        const unsubUser = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const userData = docSnap.data();
+                // Se existe uma preferência salva, aplica ela
+                if (userData.lastSelectedVehicleId) {
+                    setSelectedVehicle(userData.lastSelectedVehicleId);
+                }
+            }
+        });
+
+        // C. Metas Ativas
         const qGoals = query(
              collection(db, "goals"), 
              where("userId", "==", user.uid),
              where("status", "==", "ACTIVE")
         );
-        onSnapshot(qGoals, (snap) => {
+        const unsubGoals = onSnapshot(qGoals, (snap) => {
              setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
         });
+
+        // Cleanup dos listeners internos
+        return () => {
+            unsubVehicles();
+            unsubUser();
+            unsubGoals();
+        };
       }
     });
-    return () => unsub && unsub();
+    return () => unsubAuth && unsubAuth();
   }, []);
 
   // === 2. BUSCAR HISTÓRICO DE GANHOS DO VEÍCULO SELECIONADO ===
@@ -662,7 +682,14 @@ export default function GanhosPage() {
                   <Car className="absolute left-3 top-3.5 text-gray-500" size={18} />
                   <select 
                     value={selectedVehicle}
-                    onChange={e => setSelectedVehicle(e.target.value)}
+                    onChange={async (e) => {
+                        const newId = e.target.value;
+                        setSelectedVehicle(newId);
+                        // Salva a preferência no Firestore
+                        if (auth.currentUser) {
+                            await setDoc(doc(db, "users", auth.currentUser.uid), { lastSelectedVehicleId: newId }, { merge: true });
+                        }
+                    }}
                     className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-emerald-500 outline-none appearance-none font-medium h-12"
                   >
                     {vehicles.map(v => (
@@ -925,52 +952,52 @@ export default function GanhosPage() {
               </div>
 
               {!loading && recentGains.map(gain => {
-                  const platformInfo = getPlatformDetails(gain.platform);
-                  const isDeleting = deletingId === gain.id;
-                  return (
-                    <div 
-                      key={gain.id} 
-                      onClick={() => setSelectedTransaction(gain)}
-                      className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
-                    >
-                       <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-white flex items-center justify-center shadow-sm overflow-hidden relative">
-                            {platformInfo.logo ? <img src={platformInfo.logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-blue-600 flex items-center justify-center">{platformInfo.icon}</div>}
-                          </div>
-                          <div>
-                             <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
-                               {platformInfo.label}
-                               <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
-                             </p>
-                             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
-                                <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
-                                {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
-                                   <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-orange-400 font-mono">
-                                      <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
-                                   </span>
-                                )}
-                                {gain.description && (
-                                  <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
-                                      <FileText size={10}/> {gain.description}
+                 const platformInfo = getPlatformDetails(gain.platform);
+                 const isDeleting = deletingId === gain.id;
+                 return (
+                   <div 
+                     key={gain.id} 
+                     onClick={() => setSelectedTransaction(gain)}
+                     className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
+                   >
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-white flex items-center justify-center shadow-sm overflow-hidden relative">
+                           {platformInfo.logo ? <img src={platformInfo.logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-blue-600 flex items-center justify-center">{platformInfo.icon}</div>}
+                         </div>
+                         <div>
+                            <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
+                              {platformInfo.label}
+                              <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
+                               <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                               {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
+                                  <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-orange-400 font-mono">
+                                     <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
                                   </span>
-                                )}
-                             </div>
-                          </div>
-                       </div>
-                       <div className="flex items-center gap-3">
-                          <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
-                          <button 
-                            onClick={(e) => handleRequestDelete(e, gain.id)} 
-                            disabled={isDeleting} 
-                            className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
-                            title="Excluir"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                       </div>
-                    </div>
-                  );
-               })}
+                               )}
+                               {gain.description && (
+                                 <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
+                                     <FileText size={10}/> {gain.description}
+                                 </span>
+                               )}
+                            </div>
+                         </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                         <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
+                         <button 
+                           onClick={(e) => handleRequestDelete(e, gain.id)} 
+                           disabled={isDeleting} 
+                           className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
+                           title="Excluir"
+                         >
+                           <Trash2 size={16} />
+                         </button>
+                      </div>
+                   </div>
+                 );
+              })}
            </div>
         </div>
       </div>

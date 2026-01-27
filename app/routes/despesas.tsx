@@ -1,7 +1,10 @@
 // app/routes/despesas.tsx
 
 import { useEffect, useState } from "react";
-import { collection, addDoc, query, where, orderBy, limit, onSnapshot, updateDoc, doc, deleteDoc } from "firebase/firestore";
+import { 
+  collection, addDoc, query, where, orderBy, limit, onSnapshot, 
+  updateDoc, doc, deleteDoc, setDoc // <--- ADICIONADO setDoc
+} from "firebase/firestore";
 import { 
   Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, 
   AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign, 
@@ -253,12 +256,13 @@ export default function DespesasPage() {
       }
   };
 
-  // === 1. BUSCAR VEÍCULOS ===
+  // === 1. BUSCAR VEÍCULOS E PREFERÊNCIA DO USUÁRIO ===
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
+    const unsubAuth = auth.onAuthStateChanged((user) => {
       if (user) {
+        // A. Veículos
         const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-        onSnapshot(qVehicles, (snap) => {
+        const unsubVehicles = onSnapshot(qVehicles, (snap) => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
           setVehicles(data);
           
@@ -272,9 +276,25 @@ export default function DespesasPage() {
             }
           }
         });
+
+        // B. Preferência do Usuário (PERSISTÊNCIA)
+        const userRef = doc(db, "users", user.uid);
+        const unsubUser = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const userData = docSnap.data();
+                if (userData.lastSelectedVehicleId) {
+                    setSelectedVehicle(userData.lastSelectedVehicleId);
+                }
+            }
+        });
+
+        return () => {
+            unsubVehicles();
+            unsubUser();
+        };
       }
     });
-    return () => unsub && unsub();
+    return () => unsubAuth && unsubAuth();
   }, []);
 
   // === 2. BUSCAR HISTÓRICO DE DESPESAS DO VEÍCULO SELECIONADO ===
@@ -408,10 +428,10 @@ export default function DespesasPage() {
 
   const handleUpdateExpense = async (id: string, data: any) => {
      try {
-        const ref = doc(db, "transactions", id);
-        await updateDoc(ref, data);
+       const ref = doc(db, "transactions", id);
+       await updateDoc(ref, data);
      } catch (error) {
-        throw error;
+       throw error;
      }
   };
 
@@ -458,7 +478,18 @@ export default function DespesasPage() {
                   
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide font-bold">Veículo</label>
-                    <select value={selectedVehicle} onChange={e => setSelectedVehicle(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none">
+                    <select 
+                      value={selectedVehicle} 
+                      onChange={async (e) => {
+                          const newId = e.target.value;
+                          setSelectedVehicle(newId);
+                          // Salva a preferência no Firestore
+                          if (auth.currentUser) {
+                              await setDoc(doc(db, "users", auth.currentUser.uid), { lastSelectedVehicleId: newId }, { merge: true });
+                          }
+                      }} 
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
                       {vehicles.map(v => (
                         <option key={v.id} value={v.id}>{v.name} - {v.currentOdometer}km</option>
                       ))}
@@ -469,8 +500,8 @@ export default function DespesasPage() {
                     <>
                       {/* SELETOR DE COMBUSTÍVEL INTELIGENTE */}
                       <div className="mb-2">
-                         <label className="block text-xs text-gray-500 mb-2 font-bold uppercase">Qual Combustível?</label>
-                         <div className="flex flex-wrap gap-2">
+                          <label className="block text-xs text-gray-500 mb-2 font-bold uppercase">Qual Combustível?</label>
+                          <div className="flex flex-wrap gap-2">
                             {(() => {
                                 const v = vehicles.find(veh => veh.id === selectedVehicle);
                                 if (!v || !v.tanks) return <span className="text-gray-500 text-sm">Selecione um veículo</span>;
@@ -496,7 +527,7 @@ export default function DespesasPage() {
                                     </button>
                                 ));
                             })()}
-                         </div>
+                          </div>
                       </div>
 
                       {/* INPUTS DE ABASTECIMENTO */}
