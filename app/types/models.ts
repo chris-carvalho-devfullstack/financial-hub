@@ -35,6 +35,8 @@ export interface Vehicle {
 
   // Controle
   currentOdometer: number;
+  lastOdometerDate?: string; // <--- Importante para evitar retrocesso de odômetro em edições antigas
+  
   createdAt?: string;
   updatedAt?: string;
 }
@@ -57,6 +59,9 @@ export interface IncomeTransaction extends BaseTransaction {
   onlineDurationMinutes: number;
   tripsCount: number;
   clusterKmPerLiter?: number; // Média do painel
+  
+  // Novo campo para rastreabilidade (Fase de Metas)
+  linkedGoalId?: string; // ID da meta que recebeu o aporte deste ganho (se houver)
 }
 
 export interface ExpenseTransaction extends BaseTransaction {
@@ -65,7 +70,7 @@ export interface ExpenseTransaction extends BaseTransaction {
   isFixedCost: boolean; // Custo fixo (seguro) ou variável (combustível)
   
   // Campos específicos de abastecimento
-  fuelType?: FuelType; // <--- Qual combustível foi usado NESTE abastecimento (Fundamental para média correta)
+  fuelType?: FuelType; // <--- Qual combustível foi usado NESTE abastecimento
   liters?: number;     // Quantidade (Litros, m³ ou kWh)
   pricePerLiter?: number; // Preço unitário
   fullTank?: boolean;  // Se encheu o tanque (reset de média)
@@ -77,6 +82,10 @@ export type Transaction = IncomeTransaction | ExpenseTransaction;
 export interface Goal {
   id: string;
   userId: string;
+
+  // Vínculo com Veículos (Atualizado para Múltiplos ou Nenhum)
+  linkedVehicleIds?: string[]; // Array de IDs. Se vazio ou null = Meta Geral (Pessoal)
+
   title: string;
   targetAmount: number; // em centavos
   currentAmount: number; // em centavos

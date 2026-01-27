@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { 
-  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs 
+  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs, increment 
 } from "firebase/firestore"; 
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
@@ -10,11 +10,11 @@ import {
   LayoutGrid, ChevronUp, Trash2, Gauge,
   AlertTriangle, Navigation, FileText,
   Pencil, X, Save, Calendar, ExternalLink,
-  Info // <--- IMPORTADO NOVO ÍCONE
+  Info, Target // <--- Ícone Target importado
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
-import type { Vehicle, IncomeTransaction } from "~/types/models";
+import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
 
 // === CONFIGURAÇÃO DAS PLATAFORMAS ===
 const ALL_PLATFORMS = [
@@ -289,13 +289,14 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
 
 export default function GanhosPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [activeGoals, setActiveGoals] = useState<Goal[]>([]); // <--- NOVA LISTA DE METAS
   const [recentGains, setRecentGains] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-  const [lastFuelPrice, setLastFuelPrice] = useState(0); // <--- NOVO ESTADO
+  const [lastFuelPrice, setLastFuelPrice] = useState(0); 
   
   // ESTADO PARA O MODAL DE DETALHES
   const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransaction | null>(null);
@@ -303,6 +304,7 @@ export default function GanhosPage() {
   // Estados do Formulário
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>(Platform.UBER);
+  const [targetGoalId, setTargetGoalId] = useState(""); // <--- ESTADO PARA A META SELECIONADA
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   
@@ -316,10 +318,11 @@ export default function GanhosPage() {
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
-  // === BUSCAR VEÍCULOS E TRANSAÇÕES ===
+  // === 1. BUSCAR VEÍCULOS E METAS (Apenas uma vez ou quando mudar auth) ===
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
       if (user) {
+        // Veículos
         const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
         onSnapshot(qVehicles, (snap) => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
@@ -330,29 +333,47 @@ export default function GanhosPage() {
           }
         });
 
-        const qGains = query(
-          collection(db, "transactions"), 
-          where("userId", "==", user.uid),
-          where("type", "==", "INCOME"),
-          orderBy("date", "desc"),
-          limit(10)
+        // Metas Ativas (Carregamento solicitado)
+        const qGoals = query(
+             collection(db, "goals"), 
+             where("userId", "==", user.uid),
+             where("status", "==", "ACTIVE")
         );
-        onSnapshot(qGains, (snap) => {
-          setRecentGains(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IncomeTransaction[]);
-          setLoading(false);
+        onSnapshot(qGoals, (snap) => {
+            setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
         });
       }
     });
     return () => unsub && unsub();
   }, []);
 
+  // === 2. BUSCAR HISTÓRICO DE GANHOS DO VEÍCULO SELECIONADO ===
+  useEffect(() => {
+    if (!auth.currentUser || !selectedVehicle) return;
+
+    setLoading(true);
+    const qGains = query(
+      collection(db, "transactions"), 
+      where("userId", "==", auth.currentUser.uid),
+      where("vehicleId", "==", selectedVehicle),
+      where("type", "==", "INCOME"),
+      orderBy("date", "desc"),
+      limit(10)
+    );
+
+    const unsub = onSnapshot(qGains, (snap) => {
+      setRecentGains(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IncomeTransaction[]);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [selectedVehicle]);
+
   // === BUSCAR ÚLTIMO PREÇO DE COMBUSTÍVEL DO VEÍCULO SELECIONADO ===
   useEffect(() => {
     if (!selectedVehicle) return;
     
     const fetchLastPrice = async () => {
-      // Busca a última despesa de COMBUSTÍVEL desse carro para referência
-      // (Mantivemos a versão padrão pois você já criou os índices)
       const q = query(
         collection(db, "transactions"),
         where("vehicleId", "==", selectedVehicle),
@@ -402,7 +423,14 @@ export default function GanhosPage() {
      : 0;
   
   const currentIncome = parseFloat(amount.replace(',', '.')) || 0;
-  const estimatedProfit = currentIncome - estimatedCost;
+  const estimatedProfit = currentIncome - estimatedCost; // <--- VALOR PARA A META
+
+  // === FILTRO DE METAS (Seletor Inteligente) ===
+  const goalsForThisVehicle = activeGoals.filter(g => 
+    !g.linkedVehicleIds || 
+    g.linkedVehicleIds.length === 0 || 
+    g.linkedVehicleIds.includes(selectedVehicle)
+  );
 
   // === AÇÕES ===
 
@@ -422,7 +450,8 @@ export default function GanhosPage() {
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
-      await addDoc(collection(db, "transactions"), {
+      // Dados da Transação
+      const transactionData: any = {
         userId: auth.currentUser.uid,
         vehicleId: selectedVehicle,
         type: 'INCOME',
@@ -436,16 +465,35 @@ export default function GanhosPage() {
         odometer: finalOdometer, 
         description: description, 
         createdAt: new Date().toISOString()
-      });
+      };
 
+      // Vínculo com a Meta (Se selecionado)
+      if (targetGoalId) {
+          transactionData.linkedGoalId = targetGoalId;
+      }
+
+      await addDoc(collection(db, "transactions"), transactionData);
+
+      // Atualizar Veículo (Odômetro)
       if (finalOdometer > startOdometer) {
          const vehicleRef = doc(db, "vehicles", selectedVehicle);
-         // CORREÇÃO DE INTEGRIDADE: Atualiza data de referência do odômetro
          await updateDoc(vehicleRef, {
             currentOdometer: finalOdometer,
             lastOdometerDate: new Date(`${date}T12:00:00`).toISOString(),
             updatedAt: new Date().toISOString()
          });
+      }
+
+      // === LÓGICA DE DEPÓSITO AUTOMÁTICO NA META ===
+      if (targetGoalId && estimatedProfit > 0) {
+          // Incrementa atomicamente o valor na meta
+          // Como estimatedProfit é float e a meta pode ser float, usamos increment
+          await updateDoc(doc(db, "goals", targetGoalId), {
+              currentAmount: increment(estimatedProfit)
+          });
+          
+          // Feedback Visual Solicitado
+          alert(`Sucesso! R$ ${estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} foram destinados para a meta! 🎯`);
       }
 
       setAmount("");
@@ -455,6 +503,7 @@ export default function GanhosPage() {
       setTrips("");
       setClusterAvg(""); 
       setDescription(""); 
+      setTargetGoalId(""); // Resetar seleção de meta
       setSaving(false);
     } catch (error) {
       console.error(error);
@@ -492,6 +541,7 @@ export default function GanhosPage() {
   };
 
   const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatMoneyFloat = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const getPlatformDetails = (id: string) => ALL_PLATFORMS.find(p => p.id === id) || ALL_PLATFORMS[5];
 
   return (
@@ -600,6 +650,39 @@ export default function GanhosPage() {
                   </div>
                </div>
             </div>
+
+            {/* === SELETOR DE META INTELIGENTE === */}
+            {goalsForThisVehicle.length > 0 && (
+                <div className="bg-gradient-to-br from-purple-900/20 to-gray-900 border border-purple-500/20 p-4 rounded-xl shadow-lg">
+                   <div className="flex items-center gap-2 mb-3">
+                       <Target size={18} className="text-purple-400" />
+                       <span className="text-purple-100 font-bold text-sm">Destinar Lucro para Meta (Opcional)</span>
+                   </div>
+                   
+                   <div className="relative">
+                      <select 
+                        value={targetGoalId} 
+                        onChange={e => setTargetGoalId(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 outline-none focus:border-purple-500 appearance-none cursor-pointer"
+                      >
+                         <option value="">-- Não destinar --</option>
+                         {goalsForThisVehicle.map(g => (
+                             <option key={g.id} value={g.id}>
+                                {g.title} (Faltam {formatMoneyFloat(g.targetAmount - g.currentAmount)})
+                             </option>
+                         ))}
+                      </select>
+                      <ChevronUp className="absolute right-3 top-1/2 -translate-y-1/2 rotate-180 text-gray-500 pointer-events-none" size={16} />
+                   </div>
+                   
+                   {targetGoalId && estimatedProfit > 0 && (
+                       <div className="mt-3 text-xs text-purple-300 flex items-center gap-1 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
+                           <CheckCircle2 size={12} />
+                           Serão adicionados <b>{estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</b> à meta selecionada.
+                       </div>
+                   )}
+                </div>
+            )}
 
             {/* MÉTRICAS */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">

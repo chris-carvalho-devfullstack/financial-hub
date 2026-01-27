@@ -253,29 +253,39 @@ export default function DespesasPage() {
       }
   };
 
-  // Carregar Dados
+  // === 1. BUSCAR VEÍCULOS ===
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const userId = auth.currentUser.uid;
-
-    const qVehicles = query(collection(db, "vehicles"), where("userId", "==", userId));
-    const unsubVehicles = onSnapshot(qVehicles, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
-      setVehicles(data);
-      if (data.length > 0 && !selectedVehicle) {
-        setSelectedVehicle(data[0].id);
-        if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer));
-        
-        // Seleciona o primeiro combustível do primeiro tanque como padrão
-        if (data[0].tanks && data[0].tanks.length > 0) {
-            setFuelType(data[0].tanks[0].fuelTypes[0]);
-        }
+    const unsub = auth.onAuthStateChanged((user) => {
+      if (user) {
+        const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
+        onSnapshot(qVehicles, (snap) => {
+          const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
+          setVehicles(data);
+          
+          if (data.length > 0 && !selectedVehicle) {
+            setSelectedVehicle(data[0].id);
+            if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer));
+            
+            // Seleciona o primeiro combustível do primeiro tanque como padrão
+            if (data[0].tanks && data[0].tanks.length > 0) {
+                setFuelType(data[0].tanks[0].fuelTypes[0]);
+            }
+          }
+        });
       }
     });
+    return () => unsub && unsub();
+  }, []);
 
+  // === 2. BUSCAR HISTÓRICO DE DESPESAS DO VEÍCULO SELECIONADO ===
+  useEffect(() => {
+    if (!auth.currentUser || !selectedVehicle) return;
+    
+    setLoading(true);
     const qExpenses = query(
       collection(db, "transactions"), 
-      where("userId", "==", userId),
+      where("userId", "==", auth.currentUser.uid),
+      where("vehicleId", "==", selectedVehicle), // <--- FILTRO ADICIONADO
       where("type", "==", "EXPENSE"),
       orderBy("date", "desc"),
       limit(5)
@@ -287,8 +297,8 @@ export default function DespesasPage() {
       setLoading(false);
     }, (err) => console.error(err));
 
-    return () => { unsubVehicles(); unsubExpenses(); };
-  }, []);
+    return () => unsubExpenses();
+  }, [selectedVehicle]); // <--- Dependência adicionada
 
   // Atualiza odômetro e combustível ao trocar veículo
   useEffect(() => {
