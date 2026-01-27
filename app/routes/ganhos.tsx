@@ -10,7 +10,7 @@ import {
   LayoutGrid, ChevronUp, Trash2, Gauge,
   AlertTriangle, Navigation, FileText,
   Pencil, X, Save, Calendar, ExternalLink,
-  Info, Target // <--- Ícone Target importado
+  Info, Target 
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
@@ -65,6 +65,39 @@ const ALL_PLATFORMS = [
 
 // === COMPONENTES AUXILIARES ===
 
+// --- NOVO COMPONENTE DE FEEDBACK (SUBSTITUI O ALERT) ---
+function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: any) {
+  if (!isOpen) return null;
+
+  const isSuccess = type === 'success';
+  const Icon = isSuccess ? CheckCircle2 : AlertTriangle;
+  const iconColor = isSuccess ? 'text-emerald-500' : 'text-red-500';
+  const bgColor = isSuccess ? 'bg-emerald-500/10' : 'bg-red-500/10';
+  const buttonColor = isSuccess ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500';
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+        <div className="flex flex-col items-center text-center gap-4">
+          <div className={`${bgColor} p-4 rounded-full`}>
+            <Icon className={iconColor} size={32} />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-white">{title}</h3>
+            <p className="text-gray-400 text-sm mt-2">{message}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className={`w-full ${buttonColor} text-white py-3 rounded-xl font-bold transition-colors mt-2`}
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
@@ -103,6 +136,9 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  
+  // Estado Local para Feedback (Erro de Edição)
+  const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
 
   useEffect(() => {
     if (transaction) {
@@ -141,7 +177,12 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
       setIsEditing(false);
     } catch (error) {
       console.error(error);
-      alert("Erro ao atualizar");
+      setFeedback({
+        isOpen: true,
+        type: 'error',
+        title: 'Erro ao Atualizar',
+        message: 'Não foi possível salvar as alterações. Tente novamente.'
+      });
     } finally {
       setSaving(false);
     }
@@ -163,8 +204,8 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
   const DisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
     <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
        <div className="flex items-center gap-2">
-          {Icon && <Icon size={16} className={color} />}
-          <span className="text-sm text-gray-400">{label}</span>
+         {Icon && <Icon size={16} className={color} />}
+         <span className="text-sm text-gray-400">{label}</span>
        </div>
        <span className="font-bold text-white text-sm">{value}</span>
     </div>
@@ -172,6 +213,18 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      
+      {/* Modal de Feedback Interno */}
+      {feedback && (
+          <FeedbackModal 
+             isOpen={feedback.isOpen} 
+             type={feedback.type} 
+             title={feedback.title} 
+             message={feedback.message} 
+             onClose={() => setFeedback(null)} 
+          />
+      )}
+
       <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* HEADER */}
@@ -301,6 +354,9 @@ export default function GanhosPage() {
   // ESTADO PARA O MODAL DE DETALHES
   const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransaction | null>(null);
 
+  // NOVO: Estado para Feedback Modal Global (Sucesso ou Erro na Page)
+  const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
+
   // Estados do Formulário
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>(Platform.UBER);
@@ -340,7 +396,7 @@ export default function GanhosPage() {
              where("status", "==", "ACTIVE")
         );
         onSnapshot(qGoals, (snap) => {
-            setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
+             setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
         });
       }
     });
@@ -390,7 +446,7 @@ export default function GanhosPage() {
         setLastFuelPrice(0);
       }
     };
-  
+    
     fetchLastPrice();
   }, [selectedVehicle]);
 
@@ -400,9 +456,8 @@ export default function GanhosPage() {
           const v = vehicles.find(vec => vec.id === selectedVehicle);
           if (v) {
               const current = v.currentOdometer || 0;
-              if (odometerInput === "") {
-                 setOdometerInput(String(current));
-              }
+              // ATUALIZADO: Agora sempre atualiza o input quando o veículo muda
+              setOdometerInput(String(current));
           }
       }
   }, [selectedVehicle, vehicles]);
@@ -419,8 +474,8 @@ export default function GanhosPage() {
   
   // (Trip / Média Painel) * Preço Combustível
   const estimatedCost = (panelAvg > 0 && lastFuelPrice > 0) 
-     ? (tripKm / panelAvg) * lastFuelPrice 
-     : 0;
+      ? (tripKm / panelAvg) * lastFuelPrice 
+      : 0;
   
   const currentIncome = parseFloat(amount.replace(',', '.')) || 0;
   const estimatedProfit = currentIncome - estimatedCost; // <--- VALOR PARA A META
@@ -444,7 +499,7 @@ export default function GanhosPage() {
       const hoursNum = parseFloat(hours.replace(',', '.')) || 0;
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
       
-      const drivenKm = Number(distance) || 0;         
+      const drivenKm = Number(distance) || 0;          
       const finalOdometer = Number(odometerInput) || 0; 
 
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
@@ -487,13 +542,18 @@ export default function GanhosPage() {
       // === LÓGICA DE DEPÓSITO AUTOMÁTICO NA META ===
       if (targetGoalId && estimatedProfit > 0) {
           // Incrementa atomicamente o valor na meta
-          // Como estimatedProfit é float e a meta pode ser float, usamos increment
           await updateDoc(doc(db, "goals", targetGoalId), {
               currentAmount: increment(estimatedProfit)
           });
           
-          // Feedback Visual Solicitado
-          alert(`Sucesso! R$ ${estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} foram destinados para a meta! 🎯`);
+          // Feedback Visual Solicitado (MODAL MODERNO)
+          setFeedback({
+            isOpen: true,
+            type: 'success',
+            title: 'Meta Atualizada!',
+            // CORRIGIDO: Removido o R$ duplicado (toLocaleString já inclui)
+            message: `Sucesso! ${estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} foram destinados para a meta! 🎯`
+          });
       }
 
       setAmount("");
@@ -507,17 +567,22 @@ export default function GanhosPage() {
       setSaving(false);
     } catch (error) {
       console.error(error);
-      alert("Erro ao salvar.");
+      setFeedback({
+        isOpen: true,
+        type: 'error',
+        title: 'Erro ao Salvar',
+        message: 'Ocorreu um erro ao registrar o ganho. Tente novamente.'
+      });
       setSaving(false);
     }
   };
 
   const handleUpdateTransaction = async (id: string, data: any) => {
      try {
-        const ref = doc(db, "transactions", id);
-        await updateDoc(ref, data);
+       const ref = doc(db, "transactions", id);
+       await updateDoc(ref, data);
      } catch (error) {
-        throw error;
+       throw error;
      }
   };
 
@@ -533,7 +598,12 @@ export default function GanhosPage() {
       await deleteDoc(doc(db, "transactions", itemToDelete)); 
     } catch (e) { 
       console.error(e); 
-      alert("Erro ao excluir.");
+      setFeedback({
+        isOpen: true,
+        type: 'error',
+        title: 'Erro ao Excluir',
+        message: 'Não foi possível excluir o registro.'
+      });
     } finally { 
       setDeletingId(null); 
       setItemToDelete(null);
@@ -548,6 +618,16 @@ export default function GanhosPage() {
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
       {/* MODAIS */}
+      {feedback && (
+          <FeedbackModal 
+             isOpen={feedback.isOpen} 
+             type={feedback.type} 
+             title={feedback.title} 
+             message={feedback.message} 
+             onClose={() => setFeedback(null)} 
+          />
+      )}
+
       <ConfirmModal 
         isOpen={!!itemToDelete} 
         onClose={() => setItemToDelete(null)}
@@ -574,7 +654,7 @@ export default function GanhosPage() {
           </header>
 
           <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
-             
+              
              {/* SELEÇÃO DE VEÍCULO */}
              <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 active:border-emerald-500/50 transition-colors">
                <label className="text-gray-400 text-xs font-bold uppercase mb-2 block tracking-wider">Veículo</label>
@@ -665,12 +745,12 @@ export default function GanhosPage() {
                         onChange={e => setTargetGoalId(e.target.value)}
                         className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 outline-none focus:border-purple-500 appearance-none cursor-pointer"
                       >
-                         <option value="">-- Não destinar --</option>
-                         {goalsForThisVehicle.map(g => (
-                             <option key={g.id} value={g.id}>
-                                {g.title} (Faltam {formatMoneyFloat(g.targetAmount - g.currentAmount)})
-                             </option>
-                         ))}
+                          <option value="">-- Não destinar --</option>
+                          {goalsForThisVehicle.map(g => (
+                              <option key={g.id} value={g.id}>
+                                 {g.title} (Faltam {formatMoneyFloat(g.targetAmount - g.currentAmount)})
+                              </option>
+                          ))}
                       </select>
                       <ChevronUp className="absolute right-3 top-1/2 -translate-y-1/2 rotate-180 text-gray-500 pointer-events-none" size={16} />
                    </div>
@@ -686,9 +766,9 @@ export default function GanhosPage() {
 
             {/* MÉTRICAS */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                
-                {/* 1. KM RODADOS (TRIP) */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+               
+               {/* 1. KM RODADOS (TRIP) */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados (Trip)</label>
                    <div className="flex items-center gap-1.5">
                       <Map size={14} className="text-blue-500 shrink-0" />
@@ -700,10 +780,10 @@ export default function GanhosPage() {
                         placeholder="0" 
                       />
                    </div>
-                </div>
+               </div>
 
-                {/* 2. ODÔMETRO FINAL (PAINEL) */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
+               {/* 2. ODÔMETRO FINAL (PAINEL) */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
                    <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-500 blur-md opacity-20"></div>
                    <label className="text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Odômetro Final</label>
                    <div className="flex items-center gap-1.5">
@@ -716,10 +796,10 @@ export default function GanhosPage() {
                         placeholder="Total" 
                       />
                    </div>
-                </div>
+               </div>
 
-                {/* 3. MÉDIA PAINEL */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+               {/* 3. MÉDIA PAINEL */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
                    <div className="flex items-center gap-1.5">
                       <Gauge size={14} className="text-orange-500 shrink-0" />
@@ -731,10 +811,10 @@ export default function GanhosPage() {
                         placeholder="km/l" 
                       />
                    </div>
-                </div>
+               </div>
 
-                {/* 4. HORAS */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+               {/* 4. HORAS */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
                    <div className="flex items-center gap-1.5">
                       <Clock size={14} className="text-yellow-500 shrink-0" />
@@ -746,10 +826,10 @@ export default function GanhosPage() {
                         placeholder="0.0" 
                       />
                    </div>
-                </div>
+               </div>
 
-                {/* 5. VIAGENS */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+               {/* 5. VIAGENS */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Viagens</label>
                    <div className="flex items-center gap-1.5">
                       <Briefcase size={14} className="text-purple-500 shrink-0" />
@@ -761,10 +841,10 @@ export default function GanhosPage() {
                         placeholder="0" 
                       />
                    </div>
-                </div>
+               </div>
 
-                {/* 6. OBSERVAÇÃO */}
-                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+               {/* 6. OBSERVAÇÃO */}
+               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Observação</label>
                    <div className="flex items-center gap-1.5">
                       <FileText size={14} className="text-gray-400 shrink-0" />
@@ -775,7 +855,7 @@ export default function GanhosPage() {
                         placeholder="Ex: Chuva" 
                       />
                    </div>
-                </div>
+               </div>
             </div>
 
             {/* === MONITOR DE EFICIÊNCIA OPERACIONAL === */}
@@ -871,7 +951,7 @@ export default function GanhosPage() {
                                 )}
                                 {gain.description && (
                                   <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
-                                     <FileText size={10}/> {gain.description}
+                                      <FileText size={10}/> {gain.description}
                                   </span>
                                 )}
                              </div>
