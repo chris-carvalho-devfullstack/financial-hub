@@ -103,9 +103,28 @@ export interface Goal {
   createdAt: string;
 }
 
+// === ATUALIZAÇÃO PARA SAAS / ADMIN ===
 export interface UserProfile {
   uid: string;
   email: string;
-  lastSelectedVehicleId?: string; // <--- O campo que guarda a preferência
+  
+  // Identificação Visual (Útil para o Admin)
+  name?: string; 
+  photoUrl?: string;
+
+  // === DADOS DE ASSINATURA (SaaS) ===
+  plan: 'FREE' | 'PRO'; 
+  subscriptionStatus: 'ACTIVE' | 'CANCELED' | 'PAST_DUE' | 'EXPIRED'; // Status financeiro real
+  subscriptionEndsAt?: string; // Data de expiração (ISO)
+
+  // === MÉTRICAS DE RETENÇÃO (Churn) ===
+  // Se o usuário era PRO e cancelou, salvamos essa data.
+  // O cálculo de Churn mensal será: Usuários com canceledAt no mês / Total de usuários PRO ativos no início do mês.
+  canceledAt?: string; 
+  
+  // Preferências do App
+  lastSelectedVehicleId?: string; 
+  
   createdAt?: string;
+  updatedAt?: string;
 }

@@ -3,12 +3,12 @@ import { useState, useEffect } from "react";
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
-  signInWithPopup, // <--- Necessário para o Google
+  signInWithPopup, 
   onAuthStateChanged 
 } from "firebase/auth";
+import { doc, setDoc, getDoc } from "firebase/firestore"; // <--- Importado Firestore
 import { useNavigate } from "react-router";
-// Importe auth E googleProvider
-import { auth, googleProvider } from "~/lib/firebase.client"; 
+import { auth, googleProvider, db } from "~/lib/firebase.client"; // <--- Importado db
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -19,7 +19,7 @@ export default function Login() {
   
   const navigate = useNavigate();
 
-  // 1. Redirecionamento Inteligente (Se já logado, entra direto)
+  // 1. Redirecionamento Inteligente
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -29,12 +29,49 @@ export default function Login() {
     return () => unsubscribe();
   }, [navigate]);
 
+  // === HELPER: Sincronização Inteligente com Firestore ===
+  const syncUserToFirestore = async (user: any) => {
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      const now = new Date().toISOString();
+
+      if (userSnap.exists()) {
+        // USUÁRIO EXISTENTE:
+        // Atualiza apenas metadados (nome, foto, login) sem tocar no Plano
+        await setDoc(userRef, {
+          email: user.email,
+          name: user.displayName || userSnap.data().name || "", 
+          photoUrl: user.photoURL || userSnap.data().photoUrl || "",
+          lastLogin: now
+        }, { merge: true });
+      } else {
+        // NOVO USUÁRIO:
+        // Cria o documento com os defaults do SaaS (Free/Active)
+        await setDoc(userRef, {
+          uid: user.uid,
+          email: user.email,
+          name: user.displayName || "",
+          photoUrl: user.photoURL || "",
+          plan: "FREE",
+          subscriptionStatus: "ACTIVE",
+          createdAt: now,
+          lastLogin: now
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao sincronizar Firestore:", e);
+    }
+  };
+
   // 2. Função de Login com Google
   const handleGoogleLogin = async () => {
     setError("");
     setLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      await syncUserToFirestore(result.user); // <--- Sync automático
       navigate("/");
     } catch (err: any) {
       console.error(err);
@@ -50,11 +87,15 @@ export default function Login() {
     setLoading(true);
 
     try {
+      let result;
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        result = await signInWithEmailAndPassword(auth, email, password);
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        result = await createUserWithEmailAndPassword(auth, email, password);
       }
+      
+      // Sincroniza independente se foi login ou cadastro
+      await syncUserToFirestore(result.user); 
       navigate("/"); 
     } catch (err: any) {
       console.error(err);
@@ -95,7 +136,6 @@ export default function Login() {
           disabled={loading}
           className="w-full bg-white text-gray-900 font-bold py-3 rounded-lg mb-4 flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors disabled:opacity-50"
         >
-          {/* Ícone simples do Google */}
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path
               fill="currentColor"

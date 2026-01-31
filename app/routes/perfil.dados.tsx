@@ -1,7 +1,8 @@
 // app/routes/perfil.dados.tsx
 import { useState } from "react";
 import { updateProfile } from "firebase/auth";
-import { auth } from "~/lib/firebase.client";
+import { doc, setDoc } from "firebase/firestore"; // <--- Importar Firestore
+import { auth, db } from "~/lib/firebase.client"; // <--- Importar db
 import { SubHeader } from "~/components/sub-header";
 import { User, Mail, Link as LinkIcon, Save, Loader2 } from "lucide-react";
 
@@ -21,12 +22,25 @@ export default function PerfilDados() {
     setMessage(null);
 
     try {
+      // 1. Atualiza no Auth (Login)
       await updateProfile(user, {
         displayName: name,
         photoURL: photoURL
       });
-      setMessage({ type: 'success', text: "Perfil atualizado com sucesso!" });
+
+      // 2. Sincroniza no Firestore (Vital para o Admin ver os nomes)
+      const userRef = doc(db, "users", user.uid);
+      await setDoc(userRef, {
+        name: name,
+        photoUrl: photoURL,
+        // Garante que o email esteja lá caso seja o primeiro sync
+        email: user.email, 
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setMessage({ type: 'success', text: "Perfil atualizado e sincronizado!" });
     } catch (error) {
+      console.error(error);
       setMessage({ type: 'error', text: "Erro ao atualizar. Tente novamente." });
     } finally {
       setIsLoading(false);
