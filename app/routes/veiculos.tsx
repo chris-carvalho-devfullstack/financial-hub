@@ -1,13 +1,12 @@
 // app/routes/veiculos.tsx
 
 import { useEffect, useState } from "react";
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { 
   Car, Plus, Trash2, Gauge, Calendar, AlertTriangle, 
   Pencil, Save, X, Bike, Truck, Info, 
   Fuel, Flame, Zap, PenTool
 } from "lucide-react";
-import { db, auth } from "~/lib/app/firebase.client";
+import { supabase } from "~/lib/supabase.client"; // ✅ Cliente Supabase
 import { VehicleType, TankType, FuelType } from "~/types/enums";
 import type { Vehicle, VehicleTank } from "~/types/models";
 
@@ -95,8 +94,8 @@ function VehicleDetailsModal({ isOpen, onClose, vehicle, onEdit, onDelete }: any
     const brandSlug = BRAND_LIST.find(b => b.name.toLowerCase() === (v.brand || "").toLowerCase())?.slug;
 
     // LÓGICA DE DATA: Prioriza a data específica da leitura do odômetro
-    // Se não existir, usa updatedAt (fallback)
-    const displayDate = v.lastOdometerDate || v.updatedAt || v.createdAt;
+    // Se não existir, usa createdAt (fallback do banco)
+    const displayDate = v.lastOdometerDate || v.createdAt;
 
     // Formata a data ajustando o fuso horário para exibir corretamente
     const formattedDate = displayDate 
@@ -297,10 +296,6 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
             setOdometer(String(v.currentOdometer));
             
             // LÓGICA DE PREENCHIMENTO DA DATA NO INPUT
-            // 1. Tenta pegar a data específica (lastOdometerDate)
-            // 2. Se não tiver, tenta a data de atualização
-            // 3. Se não tiver, usa Hoje.
-            // .split('T')[0] converte ISO (2026-01-24T...) para YYYY-MM-DD aceito pelo input type="date"
             const refDate = v.lastOdometerDate ? new Date(v.lastOdometerDate) : (v.updatedAt ? new Date(v.updatedAt) : new Date());
             setOdometerDate(refDate.toISOString().split('T')[0]);
 
@@ -366,7 +361,6 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
             year: Number(year),
             licensePlate: plate.toUpperCase(),
             currentOdometer: Number(odometer),
-            // AQUI ESTÁ O SEGREDO: Salva explicitamente a data escolhida no input
             lastOdometerDate: new Date(odometerDate).toISOString(), 
             vin, renavam, notes, tanks
         };
@@ -547,35 +541,90 @@ export default function VeiculosPage() {
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null); 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!auth.currentUser) return;
-    const q = query(collection(db, "vehicles"), where("userId", "==", auth.currentUser.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      setVehicles(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[]);
+  // FETCH VEÍCULOS (SUPABASE)
+  const fetchVehicles = async () => {
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data, error } = await supabase
+      .from('vehicles')
+      .select('*')
+      .eq('user_id', session.user.id);
+    
+    if (error) {
+      console.error("Erro ao buscar veículos:", error);
       setLoading(false);
-    });
-    return () => unsub();
+      return;
+    }
+
+    // MAP: Snake Case (DB) -> Camel Case (App)
+    const mapped: Vehicle[] = (data || []).map((v: any) => ({
+      id: v.id,
+      userId: v.user_id,
+      name: v.name,
+      brand: v.brand,
+      model: v.model,
+      type: v.type,
+      year: v.year,
+      licensePlate: v.license_plate,
+      currentOdometer: v.current_odometer,
+      lastOdometerDate: v.last_odometer_date,
+      vin: v.vin,
+      renavam: v.renavam,
+      notes: v.notes,
+      tanks: v.tanks,
+      isDefault: v.is_default,
+      createdAt: v.created_at,
+      updatedAt: v.updated_at
+    }));
+
+    setVehicles(mapped);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchVehicles();
   }, []);
 
   const handleSaveVehicle = async (data: any) => {
-     if (!auth.currentUser) return;
+     const { data: { session } } = await supabase.auth.getSession();
+     if (!session) return;
+
      try {
-         const now = new Date().toISOString();
-         // A data manual (lastOdometerDate) já vem corretamente do form.
-         // updatedAt é sempre 'agora' para controle de versão do documento
-         const dataToSave: any = { ...data, updatedAt: now };
+         // MAP: Camel Case (App) -> Snake Case (DB)
+         const payload = {
+            user_id: session.user.id,
+            name: data.name,
+            brand: data.brand,
+            model: data.model,
+            type: data.type,
+            year: data.year,
+            license_plate: data.licensePlate,
+            current_odometer: data.currentOdometer,
+            last_odometer_date: data.lastOdometerDate,
+            vin: data.vin,
+            renavam: data.renavam,
+            notes: data.notes,
+            tanks: data.tanks
+         };
 
          if (vehicleToEdit) {
-             const vehicleRef = doc(db, "vehicles", vehicleToEdit.id);
-             await updateDoc(vehicleRef, dataToSave);
+             const { error } = await supabase
+              .from('vehicles')
+              .update(payload)
+              .eq('id', vehicleToEdit.id);
+             
+             if (error) throw error;
          } else {
-             // Novo veículo
-             await addDoc(collection(db, "vehicles"), {
-                userId: auth.currentUser.uid,
-                ...dataToSave,
-                createdAt: now
-             });
+             const { error } = await supabase
+              .from('vehicles')
+              .insert(payload);
+
+             if (error) throw error;
          }
+
+         await fetchVehicles(); // Recarrega a lista
      } catch (error) {
          console.error("Erro ao salvar:", error);
          alert("Erro ao salvar veículo.");
@@ -589,7 +638,17 @@ export default function VeiculosPage() {
 
   const handleDelete = async () => {
     if (deleteId) {
-      await deleteDoc(doc(db, "vehicles", deleteId));
+      const { error } = await supabase
+        .from('vehicles')
+        .delete()
+        .eq('id', deleteId);
+      
+      if (error) {
+        console.error("Erro ao deletar:", error);
+        alert("Erro ao deletar veículo.");
+      } else {
+        await fetchVehicles(); // Recarrega a lista
+      }
       setDeleteId(null);
     }
   };
@@ -640,9 +699,8 @@ export default function VeiculosPage() {
            const vehicleAny = v as any;
            // HIERARQUIA DE DATA:
            // 1. lastOdometerDate (Definido manualmente ou futuramente por transações)
-           // 2. updatedAt (Fallback)
-           // 3. createdAt (Fallback Final)
-           const displayDate = vehicleAny.lastOdometerDate || v.updatedAt || v.createdAt;
+           // 2. createdAt (Fallback Final)
+           const displayDate = vehicleAny.lastOdometerDate || v.createdAt;
 
            return (
             <div key={v.id} onClick={() => setSelectedVehicle(v)} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 relative group hover:border-blue-500/50 hover:bg-gray-800/50 transition-all cursor-pointer hover:shadow-xl hover:shadow-blue-900/10 hover:-translate-y-1">
