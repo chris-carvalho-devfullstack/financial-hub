@@ -1,6 +1,6 @@
 // app/routes/admin.users.tsx
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   Eye, 
   Ban, 
@@ -15,19 +15,10 @@ import {
   Loader2,
   AlertCircle
 } from "lucide-react";
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  where, 
-  getDocs,
-  doc,
-  updateDoc
-} from "firebase/firestore";
-import { db } from "~/lib/app/firebase.client";
+import { supabase } from "~/lib/supabase.client";
 import type { UserProfile, Vehicle, Transaction } from "~/types/models";
 
-// --- Sub-componente: Badge de Status ---
+// --- Sub-componente: Badge de Status (Mantido igual) ---
 const StatusBadge = ({ status, type = 'status' }: { status: string, type?: 'status' | 'plan' | 'role' }) => {
   let colors = "bg-gray-100 text-gray-600 border-gray-200";
   
@@ -158,7 +149,6 @@ function EditUserModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-0 md:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Ajuste Mobile: h-full e rounded-none para ocupar tela inteira no celular */}
       <div className="bg-white dark:bg-zinc-900 w-full h-full md:h-auto md:max-w-lg rounded-none md:rounded-xl shadow-2xl overflow-hidden border border-gray-200 dark:border-zinc-800 flex flex-col">
         <div className="p-4 border-b border-gray-100 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900 flex justify-between items-center">
           <h3 className="font-bold text-gray-900 dark:text-gray-100">Editar Usuário</h3>
@@ -242,40 +232,49 @@ export default function AdminUsers() {
   const [userStats, setUserStats] = useState({ income: 0, expense: 0 });
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  // --- Listener do Firestore ---
+  // --- Listener do Supabase (Realtime) ---
+  const fetchUsers = useCallback(async () => {
+    const { data, error } = await supabase.from('profiles').select('*');
+    if (error) {
+        setError("Erro ao carregar usuários.");
+    } else if (data) {
+        const mappedUsers = data.map(u => ({
+            id: u.id,
+            // uid mantido para compatibilidade com o resto do código que pode usar esse nome
+            uid: u.id, 
+            email: u.email || 'Sem email',
+            name: u.name || 'Anônimo',
+            plan: u.plan || 'FREE',
+            subscriptionStatus: u.subscription_status || 'UNKNOWN',
+            role: u.role || 'USER',
+            photoUrl: u.photo_url || u.avatar_url,
+            createdAt: u.created_at,
+            lastLogin: u.last_login
+        })) as unknown as UserProfile[];
+        
+        setUsers(mappedUsers);
+        
+        // Atualiza o user selecionado em tempo real se estiver aberto
+        if (selectedUser) {
+            const updated = mappedUsers.find(u => u.id === selectedUser.id);
+            if (updated) setSelectedUser(updated);
+        }
+    }
+    setLoading(false);
+  }, [selectedUser]);
+
   useEffect(() => {
-    const q = query(collection(db, "users"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return {
-          uid: doc.id,
-          email: d.email || 'Sem email',
-          name: d.name || 'Anônimo',
-          plan: d.plan || 'FREE',
-          subscriptionStatus: d.subscriptionStatus || 'UNKNOWN',
-          role: d.role || 'USER', 
-          photoUrl: d.photoUrl,
-          createdAt: d.createdAt,
-          lastLogin: d.lastLogin,
-          ...d
-        };
-      }) as UserProfile[];
-      setUsers(data);
-      setLoading(false);
-      
-      // Atualiza o user selecionado em tempo real se estiver aberto
-      if (selectedUser) {
-        const updated = data.find(u => u.uid === selectedUser.uid);
-        if (updated) setSelectedUser(updated);
-      }
-    }, (err) => {
-      console.error(err);
-      setError("Erro ao carregar usuários.");
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [selectedUser?.uid]); 
+    fetchUsers();
+    
+    // Configura Realtime
+    const channel = supabase.channel('admin-users-list')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+            fetchUsers();
+        })
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); }
+  }, [fetchUsers]);
 
   // --- Handlers ---
   const handleOpenUser = async (user: UserProfile) => {
@@ -286,20 +285,27 @@ export default function AdminUsers() {
     setUserStats({ income: 0, expense: 0 });
 
     try {
-      const vQuery = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-      const vSnap = await getDocs(vQuery);
-      const vehicles = vSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
-      setUserVehicles(vehicles);
+      // Fetch veículos
+      const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
+      if (vData) {
+          const mappedVehicles = vData.map(v => ({
+              ...v,
+              currentOdometer: v.current_odometer,
+              userId: v.user_id
+          }));
+          setUserVehicles(mappedVehicles as any);
+      }
 
-      const tQuery = query(collection(db, "transactions"), where("userId", "==", user.uid));
-      const tSnap = await getDocs(tQuery);
-      let inc = 0, exp = 0;
-      tSnap.docs.forEach(d => {
-        const t = d.data() as Transaction;
-        if (t.type === 'INCOME') inc += (t.amount || 0);
-        else exp += (t.amount || 0);
-      });
-      setUserStats({ income: inc, expense: exp });
+      // Fetch Stats (Transactions)
+      const { data: tData } = await supabase.from('transactions').select('amount, type').eq('user_id', user.id);
+      if (tData) {
+          let inc = 0, exp = 0;
+          tData.forEach(t => {
+              if (t.type === 'INCOME') inc += (t.amount || 0);
+              else exp += (t.amount || 0);
+          });
+          setUserStats({ income: inc, expense: exp });
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -316,7 +322,13 @@ export default function AdminUsers() {
   const handleSaveUser = async (data: Partial<UserProfile>) => {
     if (!userToEdit) return;
     try {
-      await updateDoc(doc(db, "users", userToEdit.uid), data);
+      // Mapeamento reverso (Frontend -> Banco)
+      const updateData: any = {};
+      if (data.name) updateData.name = data.name;
+      if (data.plan) updateData.plan = data.plan;
+      if (data.role) updateData.role = data.role;
+
+      await supabase.from('profiles').update(updateData).eq('id', userToEdit.id);
     } catch (e) {
       alert("Erro ao salvar: " + e);
     }
@@ -336,14 +348,14 @@ export default function AdminUsers() {
     try {
       if (type === 'block') {
         const isBlocked = user.subscriptionStatus === 'BLOCKED';
-        await updateDoc(doc(db, "users", user.uid), { 
-          subscriptionStatus: isBlocked ? 'ACTIVE' : 'BLOCKED' 
-        });
+        await supabase.from('profiles').update({ 
+            subscription_status: isBlocked ? 'ACTIVE' : 'BLOCKED' 
+        }).eq('id', user.id);
       } else {
         const isAdmin = user.role === 'ADMIN';
-        await updateDoc(doc(db, "users", user.uid), { 
-          role: isAdmin ? 'USER' : 'ADMIN' 
-        });
+        await supabase.from('profiles').update({ 
+            role: isAdmin ? 'USER' : 'ADMIN' 
+        }).eq('id', user.id);
       }
       setConfirmAction(null);
     } catch (e) {
@@ -427,7 +439,7 @@ export default function AdminUsers() {
                 <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
                   {users.map(user => (
                     <tr 
-                      key={user.uid} 
+                      key={user.id} 
                       onClick={() => handleOpenUser(user)}
                       className="group hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
                     >
@@ -461,7 +473,7 @@ export default function AdminUsers() {
             <div className="md:hidden divide-y divide-gray-100 dark:divide-zinc-800">
               {users.map(user => (
                 <div 
-                  key={user.uid} 
+                  key={user.id} 
                   onClick={() => handleOpenUser(user)}
                   className="p-4 hover:bg-gray-50 dark:hover:bg-zinc-800/30 active:bg-gray-100 transition-colors cursor-pointer"
                 >
@@ -495,14 +507,14 @@ export default function AdminUsers() {
           className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
           onClick={(e) => { if (e.target === e.currentTarget) setIsDetailModalOpen(false); }}
         >
-           {/* Modal Container: h-full no mobile, rounded-none no mobile */}
+           {/* Modal Container */}
            <div className="bg-white dark:bg-zinc-900 w-full h-full md:h-auto md:max-h-[90vh] md:max-w-3xl rounded-none md:rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-200 dark:border-zinc-800">
               
               {/* Header */}
               <div className="p-6 border-b border-gray-100 dark:border-zinc-800 flex justify-between items-center bg-gray-50/50 dark:bg-zinc-900 shrink-0">
                  <div>
                     <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Detalhes</h2>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">UID: {selectedUser.uid.substring(0,8)}...</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">UID: {selectedUser.id.substring(0,8)}...</p>
                  </div>
                  <button onClick={() => setIsDetailModalOpen(false)} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer transition-colors">
                    <X size={24} />

@@ -5,9 +5,8 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, CartesianGrid 
 } from 'recharts';
-import { Users, UserMinus, DollarSign, TrendingUp, AlertCircle, Database } from "lucide-react"; // Adicionei Database para variar o ícone
-import { collection, getDocs, query } from "firebase/firestore";
-import { db } from "~/lib/app/firebase.client";
+import { Users, UserMinus, DollarSign, TrendingUp, AlertCircle, Database } from "lucide-react";
+import { supabase } from "~/lib/supabase.client";
 import type { UserProfile } from "~/types/models";
 
 export default function AdminDashboard() {
@@ -29,9 +28,19 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const q = query(collection(db, "users"));
-        const snapshot = await getDocs(q);
-        const users = snapshot.docs.map(d => ({ uid: d.id, ...d.data() })) as UserProfile[];
+        // Busca perfis no Supabase
+        const { data: usersData, error } = await supabase.from('profiles').select('*');
+        
+        if (error) throw error;
+
+        // Mapeamento snake_case -> camelCase local para manter lógica
+        const users = usersData.map(u => ({
+            uid: u.id,
+            plan: u.plan,
+            subscriptionStatus: u.subscription_status,
+            createdAt: u.created_at,
+            canceledAt: u.canceled_at
+        }));
 
         const now = new Date();
         const thirtyDaysAgo = new Date();
@@ -110,14 +119,13 @@ export default function AdminDashboard() {
     <div className="space-y-6 pb-12">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Painel de Controle SaaS</h2>
-        {/* Removemos o texto simples de totalUsers daqui para colocar no Card */}
         <span className="text-sm text-gray-400">Atualizado agora</span>
       </div>
       
-      {/* KPI Cards - Agora com 4 colunas */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
-        {/* 1. NOVO CARD: Total de Usuários */}
+        {/* 1. Total de Usuários */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex justify-between">
           <div>
             <p className="text-sm text-gray-500 font-medium">Total de Usuários</p>

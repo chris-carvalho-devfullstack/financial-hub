@@ -13,22 +13,35 @@ import {
   HelpCircle,
   Smartphone
 } from "lucide-react";
-import { auth } from "~/lib/app/firebase.client";
+import { supabase } from "~/lib/supabase.client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function Perfil() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(auth.currentUser);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => {
-      if (!u) navigate("/login");
-      setUser(u);
+    // 1. Busca usuário atual
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) navigate("/login");
+      setUser(data.user);
     });
-    return () => unsubscribe();
+
+    // 2. Escuta mudanças na sessão (Login/Logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        navigate("/login");
+        setUser(null);
+      } else {
+        setUser(session.user);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
   const handleLogout = async () => {
-    await auth.signOut();
+    await supabase.auth.signOut();
     navigate("/login");
   };
 
@@ -72,6 +85,10 @@ export default function Perfil() {
     </button>
   );
 
+  // Helper para pegar dados do metadata (Supabase guarda nome/foto em user_metadata)
+  const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || "Motorista";
+  const userPhoto = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || user?.user_metadata?.photo_url;
+
   return (
     <div className="animate-fade-in pb-10">
       <div className="relative bg-gray-900 border-b border-gray-800 pb-8 pt-10 px-6 mb-6">
@@ -79,9 +96,9 @@ export default function Perfil() {
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-emerald-600 to-emerald-400 rounded-full blur opacity-40 group-hover:opacity-75 transition duration-500"></div>
             <div className="relative w-28 h-28 rounded-full border-4 border-gray-900 bg-gray-800 overflow-hidden flex items-center justify-center">
-              {user?.photoURL ? (
+              {userPhoto ? (
                 <img 
-                  src={user.photoURL} 
+                  src={userPhoto} 
                   alt="Perfil" 
                   className="w-full h-full object-cover"
                 />
@@ -98,7 +115,7 @@ export default function Perfil() {
           </div>
 
           <h1 className="mt-4 text-2xl font-bold text-white tracking-tight">
-            {user?.displayName || "Motorista"}
+            {userName}
           </h1>
           <p className="text-gray-400 flex items-center gap-2 mt-1 text-sm">
             <Mail size={14} />
@@ -147,14 +164,12 @@ export default function Perfil() {
               icon={Shield} 
               label="Privacidade" 
               subLabel="Gerenciar compartilhamento de dados"
-              // CORREÇÃO: Adicionado ancora #privacidade
               onClick={() => navigate("/perfil/suporte#privacidade")} 
             />
             <MenuLink 
               icon={Bell} 
               label="Notificações" 
               subLabel="Alertas de gastos e metas"
-              // CORREÇÃO: Adicionado ancora #notificacoes
               onClick={() => navigate("/perfil/preferencias#notificacoes")} 
             />
           </div>

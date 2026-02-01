@@ -1,26 +1,55 @@
 // app/routes/despesas.tsx
 
-import { useEffect, useState } from "react";
-import { 
-  collection, addDoc, query, where, orderBy, limit, onSnapshot, 
-  updateDoc, doc, deleteDoc, setDoc // <--- ADICIONADO setDoc
-} from "firebase/firestore";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { 
   Fuel, Wrench, Droplets, Calendar, Trash2, MapPin, CheckCircle, 
-  AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign, 
-  Flame, Zap, Info
+  AlertTriangle, Pencil, X, Save, Gauge, FileText, DollarSign, 
+  Flame, Zap, BatteryCharging
 } from "lucide-react";
-import { db, auth } from "~/lib/app/firebase.client";
-import { ExpenseCategory, FuelType, TankType } from "~/types/enums";
-import type { Vehicle } from "~/types/models";
+import { supabase } from "~/lib/supabase.client";
+import { ExpenseCategory, FuelType } from "~/types/enums";
+import type { Vehicle, ExpenseTransaction, FuelTransaction } from "~/types/models";
+import type { User } from "@supabase/supabase-js";
 
-// === COMPONENTES DE MODAL (MANTIDOS IGUAIS) ===
+// === HELPER DE UNIDADES E ÍCONES ===
+const getFuelUnit = (type: FuelType) => {
+  switch (type) {
+    case FuelType.CNG: return 'm³';
+    case FuelType.ELECTRIC: return 'kWh';
+    default: return 'L';
+  }
+};
+
+const getFuelLabel = (type: FuelType) => {
+  switch (type) {
+    case FuelType.GASOLINE: return 'Gasolina';
+    case FuelType.ETHANOL: return 'Etanol';
+    case FuelType.DIESEL: return 'Diesel';
+    case FuelType.CNG: return 'GNV';
+    case FuelType.ELECTRIC: return 'Elétrico';
+    default: return type;
+  }
+};
+
+const getFillLabel = (type: FuelType) => {
+  if (type === FuelType.ELECTRIC) return 'Carga Completa (100%)';
+  if (type === FuelType.CNG) return 'Cilindro Cheio';
+  return 'Tanque Cheio';
+};
+
+const getFuelIcon = (type: FuelType, size = 18) => {
+  if (type === FuelType.ELECTRIC) return <Zap size={size} />;
+  if (type === FuelType.CNG) return <Flame size={size} />;
+  return <Fuel size={size} />;
+};
+
+// === COMPONENTES DE MODAL ===
 
 function SuccessModal({ isOpen, onClose, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-gray-900 border border-emerald-500/30 rounded-2xl p-6 max-w-sm w-full shadow-2xl transform transition-all scale-100">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+      <div className="bg-gray-900 border border-emerald-500/30 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <div className="flex flex-col items-center text-center">
           <div className="h-16 w-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4">
             <CheckCircle className="h-8 w-8 text-emerald-500" />
@@ -39,7 +68,7 @@ function SuccessModal({ isOpen, onClose, title, message }: any) {
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
@@ -59,7 +88,7 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-// === NOVO MODAL DE DETALHES (ATUALIZADO PARA SUPORTAR NOVOS COMBUSTÍVEIS) ===
+// === MODAL DE DETALHES (Input/Edit) ===
 function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
@@ -76,7 +105,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
         stationName: transaction.stationName || "",
         description: transaction.description || "",
         category: transaction.category || "",
-        fuelType: transaction.fuelType || FuelType.GASOLINE // Novo campo
+        fuelType: transaction.fuelType || FuelType.GASOLINE
       });
       setIsEditing(false);
     }
@@ -85,6 +114,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
   if (!isOpen || !transaction) return null;
 
   const isFuel = transaction.category === 'FUEL' || transaction.category === ExpenseCategory.FUEL;
+  const unit = isFuel ? getFuelUnit(formData.fuelType) : '';
 
   const handleSave = async () => {
     setSaving(true);
@@ -97,9 +127,8 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
 
       if (isFuel) {
          updates.liters = Number(formData.liters);
-         updates.pricePerLiter = Number(formData.pricePerLiter);
-         updates.stationName = formData.stationName;
-         // updates.fuelType = formData.fuelType; // Opcional: permitir trocar combustível na edição
+         updates.price_per_liter = Number(formData.pricePerLiter);
+         updates.station_name = formData.stationName;
       } else {
          updates.description = formData.description;
       }
@@ -120,7 +149,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
       <input 
         type={type} step={step}
         value={formData[field]} onChange={e => setFormData({...formData, [field]: e.target.value})}
-        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
         placeholder={placeholder}
       />
     </div>
@@ -129,8 +158,8 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
   const DisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
     <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
        <div className="flex items-center gap-2">
-          {Icon && <Icon size={16} className={color} />}
-          <span className="text-sm text-gray-400">{label}</span>
+         {Icon && <Icon size={16} className={color} />}
+         <span className="text-sm text-gray-400">{label}</span>
        </div>
        <span className="font-bold text-white text-sm">{value}</span>
     </div>
@@ -143,11 +172,11 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
            <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors"><X size={20} /></button>
            <div className="flex flex-col items-center">
               <div className={`w-16 h-16 rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4 ${isFuel ? 'bg-yellow-500 text-black' : 'bg-blue-600 text-white'}`}>
-                 {isFuel ? <Fuel size={32} /> : <Wrench size={32} />}
+                 {isFuel ? getFuelIcon(formData.fuelType, 32) : <Wrench size={32} />}
               </div>
               <h2 className="text-2xl font-bold text-white">{isFuel ? 'Abastecimento' : 'Despesa'}</h2>
               <div className="text-sm font-medium text-gray-400 opacity-80 uppercase tracking-wider">
-                 {isFuel ? (transaction.fuelType || 'Combustível') : (transaction.category === 'MAINTENANCE' ? 'Manutenção' : transaction.category)}
+                 {isFuel ? getFuelLabel(formData.fuelType) : (transaction.category === 'MAINTENANCE' ? 'Manutenção' : transaction.category)}
               </div>
            </div>
         </div>
@@ -160,8 +189,8 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
                  <div className="col-span-2"><InputField label="Odômetro (KM)" field="odometer" /></div>
                  {isFuel ? (
                     <>
-                       <InputField label="Quantidade" field="liters" step="0.001" />
-                       <InputField label="Preço Unitário" field="pricePerLiter" step="0.001" />
+                       <InputField label={`Quantidade (${unit})`} field="liters" step="0.001" />
+                       <InputField label={`Preço / ${unit}`} field="pricePerLiter" step="0.001" />
                        <div className="col-span-2"><InputField label="Nome do Posto" field="stationName" type="text" /></div>
                     </>
                  ) : (
@@ -178,10 +207,10 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
                     <DisplayField label="Odômetro" value={`${formData.odometer ? formData.odometer + ' km' : 'Não informado'}`} icon={Gauge} color="text-emerald-500" />
                     {isFuel ? (
                        <>
-                          <DisplayField label="Posto" value={formData.stationName} icon={MapPin} color="text-red-400" />
+                          <DisplayField label="Posto" value={formData.stationName || 'Não informado'} icon={MapPin} color="text-red-400" />
                           <div className="grid grid-cols-2 gap-3">
-                             <DisplayField label="Qtd." value={`${Number(formData.liters).toFixed(3)} ${transaction.fuelType === FuelType.CNG ? 'm³' : transaction.fuelType === FuelType.ELECTRIC ? 'kWh' : 'L'}`} icon={Droplets} color="text-blue-400" />
-                             <DisplayField label="Unitário" value={`R$ ${Number(formData.pricePerLiter).toFixed(2)}`} icon={DollarSign} color="text-green-400" />
+                             <DisplayField label={`Qtd (${unit})`} value={Number(formData.liters).toFixed(3)} icon={Droplets} color="text-blue-400" />
+                             <DisplayField label={`R$ / ${unit}`} value={`R$ ${Number(formData.pricePerLiter).toFixed(2)}`} icon={DollarSign} color="text-green-400" />
                           </div>
                        </>
                     ) : (
@@ -210,6 +239,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
 // === PÁGINA PRINCIPAL ===
 
 export default function DespesasPage() {
+  const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'FUEL' | 'GENERAL'>('FUEL');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [recentExpenses, setRecentExpenses] = useState<any[]>([]);
@@ -222,138 +252,157 @@ export default function DespesasPage() {
   const [selectedExpense, setSelectedExpense] = useState<any | null>(null);
 
   // Estados Comuns
-  const [selectedVehicle, setSelectedVehicle] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [amount, setAmount] = useState(""); 
   const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [description, setDescription] = useState("");
   const [odometer, setOdometer] = useState(""); 
 
-  // Estados Específicos de Combustível
+  // Estados Específicos de Combustível/Energia
   const [fuelType, setFuelType] = useState<FuelType>(FuelType.GASOLINE);
-  const [liters, setLiters] = useState("");
-  const [pricePerLiter, setPricePerLiter] = useState("");
+  const [quantity, setQuantity] = useState(""); // Litros, m³ ou kWh
+  const [pricePerUnit, setPricePerUnit] = useState(""); // Preço por L, m³ ou kWh
   const [fullTank, setFullTank] = useState(true);
   const [stationName, setStationName] = useState(""); 
 
   // Estados Específicos Gerais
   const [category, setCategory] = useState<ExpenseCategory>(ExpenseCategory.MAINTENANCE);
 
-  // Helpers de Unidade
-  const getUnit = () => {
-      if (fuelType === FuelType.CNG) return 'm³';
-      if (fuelType === FuelType.ELECTRIC) return 'kWh';
-      return 'Litros';
-  };
+  // Memo: Veículo Selecionado Completo
+  const selectedVehicle = useMemo(() => 
+    vehicles.find(v => v.id === selectedVehicleId), 
+  [vehicles, selectedVehicleId]);
 
-  const translateFuel = (f: FuelType) => {
-      switch (f) {
-          case FuelType.GASOLINE: return "Gasolina";
-          case FuelType.ETHANOL: return "Etanol";
-          case FuelType.DIESEL: return "Diesel";
-          case FuelType.CNG: return "GNV";
-          case FuelType.ELECTRIC: return "Elétrico";
-          default: return f;
-      }
-  };
-
-  // === 1. BUSCAR VEÍCULOS E PREFERÊNCIA DO USUÁRIO ===
-  useEffect(() => {
-    const unsubAuth = auth.onAuthStateChanged((user) => {
-      if (user) {
-        // A. Veículos
-        const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-        const unsubVehicles = onSnapshot(qVehicles, (snap) => {
-          const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
-          setVehicles(data);
-          
-          if (data.length > 0 && !selectedVehicle) {
-            setSelectedVehicle(data[0].id);
-            if (data[0].currentOdometer) setOdometer(String(data[0].currentOdometer));
-            
-            // Seleciona o primeiro combustível do primeiro tanque como padrão
-            if (data[0].tanks && data[0].tanks.length > 0) {
-                setFuelType(data[0].tanks[0].fuelTypes[0]);
-            }
-          }
-        });
-
-        // B. Preferência do Usuário (PERSISTÊNCIA)
-        const userRef = doc(db, "users", user.uid);
-        const unsubUser = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const userData = docSnap.data();
-                if (userData.lastSelectedVehicleId) {
-                    setSelectedVehicle(userData.lastSelectedVehicleId);
-                }
-            }
-        });
-
-        return () => {
-            unsubVehicles();
-            unsubUser();
-        };
-      }
+  // Memo: Combustíveis Disponíveis para o Veículo Selecionado
+  const availableFuels = useMemo(() => {
+    if (!selectedVehicle || !selectedVehicle.tanks) return [FuelType.GASOLINE];
+    // Extrai todos os tipos de combustível de todos os tanques e remove duplicatas
+    const types = new Set<FuelType>();
+    selectedVehicle.tanks.forEach(tank => {
+        tank.fuelTypes.forEach(ft => types.add(ft));
     });
-    return () => unsubAuth && unsubAuth();
+    return Array.from(types);
+  }, [selectedVehicle]);
+
+  // === 0. AUTENTICAÇÃO ===
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUser(data.user));
   }, []);
 
-  // === 2. BUSCAR HISTÓRICO DE DESPESAS DO VEÍCULO SELECIONADO ===
-  useEffect(() => {
-    if (!auth.currentUser || !selectedVehicle) return;
+  // === 1. BUSCAR VEÍCULOS E PREFERÊNCIA ===
+  const fetchVehiclesAndPref = useCallback(async () => {
+    if (!user) return;
     
-    setLoading(true);
-    const qExpenses = query(
-      collection(db, "transactions"), 
-      where("userId", "==", auth.currentUser.uid),
-      where("vehicleId", "==", selectedVehicle), // <--- FILTRO ADICIONADO
-      where("type", "==", "EXPENSE"),
-      orderBy("date", "desc"),
-      limit(5)
-    );
+    const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
+    if (vData) {
+       // Mapeamento snake_case -> camelCase
+       const mappedVehicles = vData.map(v => ({
+          ...v,
+          userId: v.user_id,
+          currentOdometer: v.current_odometer,
+          lastOdometerDate: v.last_odometer_date,
+          // Garante que tanks seja um array, mesmo que venha null
+          tanks: v.tanks || [] 
+       }));
+       setVehicles(mappedVehicles as any);
 
-    const unsubExpenses = onSnapshot(qExpenses, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setRecentExpenses(data);
-      setLoading(false);
-    }, (err) => console.error(err));
+       if (mappedVehicles.length > 0 && !selectedVehicleId) {
+           const { data: pData } = await supabase.from('profiles').select('last_selected_vehicle_id').eq('id', user.id).single();
+           if (pData?.last_selected_vehicle_id) {
+               setSelectedVehicleId(pData.last_selected_vehicle_id);
+           } else {
+               setSelectedVehicleId(mappedVehicles[0].id);
+           }
+       }
+    }
+  }, [user, selectedVehicleId]);
 
-    return () => unsubExpenses();
-  }, [selectedVehicle]); // <--- Dependência adicionada
-
-  // Atualiza odômetro e combustível ao trocar veículo
   useEffect(() => {
-    const vehicle = vehicles.find(v => v.id === selectedVehicle);
-    if (vehicle) {
-        setOdometer(String(vehicle.currentOdometer || ""));
-        // Reseta o tipo de combustível para o primeiro disponível no carro novo
-        if (vehicle.tanks && vehicle.tanks.length > 0) {
-            setFuelType(vehicle.tanks[0].fuelTypes[0]);
+    if (user) {
+        fetchVehiclesAndPref();
+        const channel = supabase.channel('realtime-vehicles-exp')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => fetchVehiclesAndPref())
+            .subscribe();
+        return () => { supabase.removeChannel(channel); }
+    }
+  }, [user, fetchVehiclesAndPref]);
+
+  // Resetar campos quando troca de veículo
+  useEffect(() => {
+    if (selectedVehicle) {
+        setOdometer(String(selectedVehicle.currentOdometer || ""));
+        // Se o combustível atual não for suportado pelo novo carro, muda para o primeiro disponível
+        if (!availableFuels.includes(fuelType)) {
+            setFuelType(availableFuels[0] || FuelType.GASOLINE);
         }
     }
-  }, [selectedVehicle, vehicles]);
+  }, [selectedVehicle, availableFuels]);
+
+  // === 2. BUSCAR HISTÓRICO ===
+  const fetchExpenses = useCallback(async () => {
+    if (!user || !selectedVehicleId) return;
+    setLoading(true);
+
+    const { data, error } = await supabase
+       .from('transactions')
+       .select('*')
+       .eq('user_id', user.id)
+       .eq('vehicle_id', selectedVehicleId)
+       .eq('type', 'EXPENSE')
+       .order('date', { ascending: false })
+       .limit(5);
+
+    if (!error && data) {
+        const mapped = data.map(t => ({
+            ...t,
+            fuelType: t.fuel_type,
+            stationName: t.station_name,
+            pricePerLiter: t.price_per_liter,
+            fullTank: t.is_full_tank,
+            liters: t.liters // Mesmo nome para m3/kWh por compatibilidade de campo, mas a UI sabe interpretar
+        }));
+        setRecentExpenses(mapped);
+    }
+    setLoading(false);
+  }, [user, selectedVehicleId]);
+
+  useEffect(() => {
+    if (user && selectedVehicleId) {
+        fetchExpenses();
+        const channel = supabase.channel(`realtime-expenses-${selectedVehicleId}`)
+            .on('postgres_changes', 
+                { event: '*', schema: 'public', table: 'transactions', filter: `vehicle_id=eq.${selectedVehicleId}` }, 
+                () => fetchExpenses()
+            )
+            .subscribe();
+        return () => { supabase.removeChannel(channel); }
+    }
+  }, [user, selectedVehicleId, fetchExpenses]);
+
+  // === CÁLCULOS ===
+  const handleQuantityChange = (val: string) => {
+    setQuantity(val);
+    if (val && pricePerUnit) setAmount((parseFloat(val) * parseFloat(pricePerUnit)).toFixed(2));
+  };
+  const handlePriceChange = (val: string) => {
+    setPricePerUnit(val);
+    if (quantity && val) setAmount((parseFloat(quantity) * parseFloat(val)).toFixed(2));
+  };
+  const handleAmountChange = (val: string) => {
+    setAmount(val);
+    if (val && pricePerUnit) setQuantity((parseFloat(val) / parseFloat(pricePerUnit)).toFixed(3));
+  };
 
   const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (["-", "e"].includes(e.key)) e.preventDefault();
   };
 
-  // === CÁLCULOS ===
-  const handleLitersChange = (val: string) => {
-    setLiters(val);
-    if (val && pricePerLiter) setAmount((parseFloat(val) * parseFloat(pricePerLiter)).toFixed(2));
-  };
-  const handlePriceChange = (val: string) => {
-    setPricePerLiter(val);
-    if (liters && val) setAmount((parseFloat(liters) * parseFloat(val)).toFixed(2));
-  };
-  const handleAmountChange = (val: string) => {
-    setAmount(val);
-    if (val && pricePerLiter) setLiters((parseFloat(val) / parseFloat(pricePerLiter)).toFixed(3));
-  };
+  const formatMoney = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   // === AÇÕES ===
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !selectedVehicle) return;
+    if (!user || !selectedVehicleId) return;
     setSaving(true);
 
     try {
@@ -362,60 +411,54 @@ export default function DespesasPage() {
       const currentOdometerValue = Number(odometer);
       
       const baseData = {
-        userId: auth.currentUser.uid,
-        vehicleId: selectedVehicle,
+        user_id: user.id,
+        vehicle_id: selectedVehicleId,
         type: 'EXPENSE',
         amount: amountInCents,
         date: new Date(`${date}T00:00:00`).toISOString(),
         description: activeTab === 'FUEL' ? 'Abastecimento' : description,
         odometer: currentOdometerValue > 0 ? currentOdometerValue : null,
-        createdAt: new Date().toISOString()
       };
 
       if (activeTab === 'FUEL') {
-        await addDoc(collection(db, "transactions"), {
-          ...baseData,
-          category: ExpenseCategory.FUEL,
-          fuelType, // Salva se foi GNV, Gasolina, etc.
-          liters: Number(liters),
-          pricePerLiter: Number(pricePerLiter),
-          fullTank,
-          stationName: stationName || "Posto não informado"
-        });
+         await supabase.from('transactions').insert({
+            ...baseData,
+            category: ExpenseCategory.FUEL,
+            fuel_type: fuelType,
+            liters: Number(quantity), // Salva na coluna 'liters' mesmo sendo m3/kWh (o modelo sabe interpretar pelo fuel_type)
+            price_per_liter: Number(pricePerUnit),
+            is_full_tank: fullTank,
+            station_name: stationName || "Posto/Estação não informado"
+         });
       } else {
-        await addDoc(collection(db, "transactions"), { 
+         await supabase.from('transactions').insert({ 
             ...baseData, 
             category, 
-            isFixedCost: false 
-        });
+            is_fixed_cost: false 
+         });
       }
 
-      // ATUALIZAÇÃO DO VEÍCULO (Com integridade de data)
-      const currentCar = vehicles.find(v => v.id === selectedVehicle);
-      if (currentCar && currentOdometerValue > (currentCar.currentOdometer || 0)) {
+      // ATUALIZAÇÃO DO VEÍCULO (ODÔMETRO)
+      if (selectedVehicle && currentOdometerValue > (selectedVehicle.currentOdometer || 0)) {
         const updateData: any = { 
-            currentOdometer: currentOdometerValue,
-            updatedAt: new Date().toISOString()
+            current_odometer: currentOdometerValue,
+            updated_at: new Date().toISOString()
         };
-        // Se a data do lançamento for HOJE ou FUTURO, atualiza a data de referência do odômetro
-        // Se for retroativo, NÃO atualiza a lastOdometerDate para não quebrar a lógica de "última leitura real"
         const launchDate = new Date(`${date}T00:00:00`);
         const today = new Date();
         today.setHours(0,0,0,0);
 
         if (launchDate >= today) {
-            updateData.lastOdometerDate = new Date().toISOString();
+            updateData.last_odometer_date = new Date().toISOString();
         }
-
-        await updateDoc(doc(db, "vehicles", selectedVehicle), updateData);
+        await supabase.from('vehicles').update(updateData).eq('id', selectedVehicleId);
       }
 
       setSaving(false);
       setShowSuccess(true); 
       
-      // Limpar campos
       setAmount("");
-      setLiters("");
+      setQuantity("");
       setStationName("");
       setDescription("");
 
@@ -427,30 +470,25 @@ export default function DespesasPage() {
   };
 
   const handleUpdateExpense = async (id: string, data: any) => {
-     try {
-       const ref = doc(db, "transactions", id);
-       await updateDoc(ref, data);
-     } catch (error) {
-       throw error;
-     }
+     await supabase.from('transactions').update(data).eq('id', id);
   };
 
   const handleDelete = async () => {
     if (deleteId) {
-      await deleteDoc(doc(db, "transactions", deleteId));
+      await supabase.from('transactions').delete().eq('id', deleteId);
       setDeleteId(null);
     }
   };
 
-  const formatMoney = (cents: number) => {
-    return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
+  // Unidade atual baseada no combustível selecionado
+  const currentUnit = getFuelUnit(fuelType);
 
   return (
-    <div>
+    <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      
       <h1 className="text-3xl font-bold text-white mb-6">Registrar Despesas</h1>
       
-      <SuccessModal isOpen={showSuccess} onClose={() => setShowSuccess(false)} title="Salvo com Sucesso!" message="A despesa foi registrada e a quilometragem atualizada." />
+      <SuccessModal isOpen={showSuccess} onClose={() => setShowSuccess(false)} title="Salvo com Sucesso!" message="O registro foi salvo e a quilometragem atualizada." />
       <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete} title="Excluir Despesa?" message="Essa ação não pode ser desfeita." />
       <ExpenseDetailsModal isOpen={!!selectedExpense} transaction={selectedExpense} onClose={() => setSelectedExpense(null)} onUpdate={handleUpdateExpense} />
 
@@ -479,14 +517,11 @@ export default function DespesasPage() {
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide font-bold">Veículo</label>
                     <select 
-                      value={selectedVehicle} 
+                      value={selectedVehicleId} 
                       onChange={async (e) => {
                           const newId = e.target.value;
-                          setSelectedVehicle(newId);
-                          // Salva a preferência no Firestore
-                          if (auth.currentUser) {
-                              await setDoc(doc(db, "users", auth.currentUser.uid), { lastSelectedVehicleId: newId }, { merge: true });
-                          }
+                          setSelectedVehicleId(newId);
+                          if (user) await supabase.from('profiles').update({ last_selected_vehicle_id: newId }).eq('id', user.id);
                       }} 
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
@@ -498,73 +533,70 @@ export default function DespesasPage() {
 
                   {activeTab === 'FUEL' ? (
                     <>
-                      {/* SELETOR DE COMBUSTÍVEL INTELIGENTE */}
+                      {/* SELETOR DE COMBUSTÍVEL INTELIGENTE (BASEADO NOS TANQUES DO VEÍCULO) */}
                       <div className="mb-2">
-                          <label className="block text-xs text-gray-500 mb-2 font-bold uppercase">Qual Combustível?</label>
+                          <label className="block text-xs text-gray-500 mb-2 font-bold uppercase">Fonte de Energia</label>
                           <div className="flex flex-wrap gap-2">
-                            {(() => {
-                                const v = vehicles.find(veh => veh.id === selectedVehicle);
-                                if (!v || !v.tanks) return <span className="text-gray-500 text-sm">Selecione um veículo</span>;
-                                
-                                const allFuels = Array.from(new Set(v.tanks.flatMap(t => t.fuelTypes)));
-
-                                return allFuels.map(f => (
-                                    <button
-                                        key={f}
-                                        type="button"
-                                        onClick={() => setFuelType(f)}
-                                        className={`flex-1 min-w-[80px] py-3 rounded-xl border font-bold text-sm transition-all relative overflow-hidden ${
-                                            fuelType === f 
-                                            ? (f === FuelType.ETHANOL ? 'bg-emerald-600 border-emerald-500 text-white' 
-                                                : f === FuelType.GASOLINE ? 'bg-red-600 border-red-500 text-white'
-                                                : f === FuelType.CNG ? 'bg-blue-600 border-blue-500 text-white'
-                                                : 'bg-yellow-600 border-yellow-500 text-white')
-                                            : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
-                                        }`}
-                                    >
-                                        {translateFuel(f)}
-                                        {fuelType === f && <div className="absolute inset-0 bg-white/10 animate-pulse"></div>}
-                                    </button>
-                                ));
-                            })()}
+                            {availableFuels.length === 0 ? (
+                                <p className="text-sm text-gray-500 italic">Nenhuma fonte configurada para este veículo.</p>
+                            ) : availableFuels.map(f => (
+                                <button
+                                    key={f}
+                                    type="button"
+                                    onClick={() => setFuelType(f)}
+                                    className={`flex-1 min-w-[80px] py-3 rounded-xl border font-bold text-sm transition-all relative overflow-hidden flex items-center justify-center gap-1 ${
+                                        fuelType === f 
+                                        ? (f === FuelType.ETHANOL ? 'bg-emerald-600 border-emerald-500 text-white' 
+                                            : f === FuelType.GASOLINE ? 'bg-red-600 border-red-500 text-white'
+                                            : f === FuelType.CNG ? 'bg-blue-600 border-blue-500 text-white'
+                                            : f === FuelType.ELECTRIC ? 'bg-yellow-500 border-yellow-400 text-black'
+                                            : 'bg-yellow-600 border-yellow-500 text-white')
+                                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {f === FuelType.ELECTRIC && <Zap size={14}/>}
+                                    {f === FuelType.CNG && <Flame size={14}/>}
+                                    {getFuelLabel(f)}
+                                </button>
+                            ))}
                           </div>
                       </div>
 
-                      {/* INPUTS DE ABASTECIMENTO */}
+                      {/* INPUTS DE ABASTECIMENTO (ADAPTADOS À UNIDADE) */}
                       <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-4">
                         <div>
-                          <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1"><MapPin size={12} className="text-emerald-500"/> Posto / Estação</label>
-                          <input value={stationName} onChange={e => setStationName(e.target.value)} placeholder="Ex: Posto Ipiranga" className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white placeholder-gray-500 focus:border-emerald-500 outline-none transition-colors" />
+                          <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1"><MapPin size={12} className="text-emerald-500"/> {fuelType === FuelType.ELECTRIC ? 'Estação de Recarga' : 'Posto'}</label>
+                          <input value={stationName} onChange={e => setStationName(e.target.value)} placeholder={fuelType === FuelType.ELECTRIC ? "Ex: Shopping..." : "Ex: Posto Ipiranga"} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white placeholder-gray-500 focus:border-emerald-500 outline-none transition-colors" />
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-emerald-400 mb-1 font-bold">Preço / {getUnit().replace('Litros', 'L')}</label>
-                            <input type="number" step="0.001" required min="0" value={pricePerLiter} onChange={e => handlePriceChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0.00" />
+                            <label className="block text-xs text-emerald-400 mb-1 font-bold">Preço / {currentUnit}</label>
+                            <input type="number" step="0.001" required min="0" value={pricePerUnit} onChange={e => handlePriceChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-medium focus:border-emerald-500 outline-none" placeholder="0.00" />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-400 mb-1">Total (R$)</label>
-                            <input type="number" step="0.01" min="0" value={amount} onChange={e => handleAmountChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0.00" />
+                            <input type="number" step="0.01" min="0" value={amount} onChange={e => handleAmountChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-2 text-white font-bold text-lg focus:border-emerald-500 outline-none" placeholder="0.00" />
                           </div>
                         </div>
                         
                         <div className="relative">
-                            <input type="number" step="0.001" required min="0" value={liters} onChange={e => handleLitersChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                            <span className="absolute left-3 top-2 text-xs text-gray-500 uppercase font-bold tracking-wider">{getUnit()}</span>
+                            <input type="number" step="0.001" required min="0" value={quantity} onChange={e => handleQuantityChange(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-gray-300 font-mono text-sm pl-24" />
+                            <span className="absolute left-3 top-2 text-xs text-gray-500 uppercase font-bold tracking-wider">Qtd ({currentUnit})</span>
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Odômetro (KM Total)</label>
-                        <input type="number" required min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                        <label className="block text-xs text-gray-500 mb-1">Odômetro Total (KM)</label>
+                        <input type="number" required min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono text-emerald-400 font-bold tracking-wider text-lg" />
                       </div>
 
-                      <div className="flex items-center gap-3 py-2 bg-gray-800/30 p-2 rounded-lg cursor-pointer" onClick={() => setFullTank(!fullTank)}>
+                      <div className="flex items-center gap-3 py-2 bg-gray-800/30 p-2 rounded-lg cursor-pointer select-none" onClick={() => setFullTank(!fullTank)}>
                           <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${fullTank ? 'bg-emerald-500 border-emerald-500' : 'border-gray-600'}`}>
                              {fullTank && <CheckCircle size={14} className="text-white" />}
                           </div>
-                          <label className="text-sm text-gray-300 cursor-pointer select-none">
-                              {fuelType === FuelType.ELECTRIC ? 'Carga Completa (100%)' : 'Tanque Cheio (Resetar média)'}
+                          <label className="text-sm text-gray-300 cursor-pointer">
+                              {getFillLabel(fuelType)}
                           </label>
                       </div>
                     </>
@@ -590,12 +622,12 @@ export default function DespesasPage() {
 
                       <div>
                           <label className="block text-xs text-emerald-500 mb-1 font-bold">Valor (R$)</label>
-                          <input type="number" step="0.01" required min="0" value={amount} onChange={e => setAmount(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                          <input type="number" step="0.01" required min="0" value={amount} onChange={e => setAmount(e.target.value)} onKeyDown={preventNegativeInput} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white text-lg outline-none" />
                       </div>
 
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Odômetro (Opcional)</label>
-                        <input type="number" min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} placeholder="KM no momento do serviço" className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                        <input type="number" min="0" value={odometer} onChange={e => setOdometer(e.target.value)} onKeyDown={preventNegativeInput} placeholder="KM no momento do serviço" className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white font-mono placeholder-gray-600" />
                       </div>
                     </>
                   )}
@@ -606,7 +638,7 @@ export default function DespesasPage() {
                   </div>
 
                   <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all mt-2 transform active:scale-95">
-                    {saving ? "Salvando..." : activeTab === 'FUEL' ? "Confirmar Abastecimento" : "Confirmar Despesa"}
+                    {saving ? "Salvando..." : activeTab === 'FUEL' ? "Confirmar" : "Confirmar Despesa"}
                   </button>
                 </form>
               )}
@@ -625,21 +657,18 @@ export default function DespesasPage() {
               <div key={exp.id} onClick={() => setSelectedExpense(exp)} className="group bg-gray-900 border border-gray-800 p-4 rounded-xl flex justify-between items-center hover:border-emerald-500/30 transition-all hover:bg-gray-800/50 cursor-pointer">
                 <div className="flex items-center gap-4">
                   <div className={`h-12 w-12 rounded-xl flex items-center justify-center border border-opacity-10 ${exp.category === 'FUEL' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500' : 'bg-blue-500/10 text-blue-500 border-blue-500'}`}>
-                    {exp.category === 'FUEL' ? (
-                        exp.fuelType === FuelType.CNG ? <Flame size={20}/> : 
-                        exp.fuelType === FuelType.ELECTRIC ? <Zap size={20}/> : 
-                        <Fuel size={20}/>
-                    ) : <Wrench size={20}/>}
+                    {exp.category === 'FUEL' ? getFuelIcon(exp.fuelType, 20) : <Wrench size={20}/>}
                   </div>
                   <div>
                     <p className="font-bold text-white text-lg flex items-center gap-2">{formatMoney(exp.amount)}</p>
                     <p className="text-sm text-gray-400 capitalize flex items-center gap-2">
                       {exp.category === 'FUEL' ? (
                             <>
-                                <span className="text-gray-300 font-bold bg-gray-800 px-1 rounded text-[10px] uppercase">{translateFuel(exp.fuelType)}</span>
-                                <span className="text-gray-300">{exp.stationName || 'Posto'}</span>
+                                <span className="text-gray-300 font-bold bg-gray-800 px-1 rounded text-[10px] uppercase">{getFuelLabel(exp.fuelType)}</span>
+                                <span className="text-gray-300 hidden sm:inline">{exp.stationName}</span>
                                 <span className="text-gray-600">•</span>
-                                <span>{Number(exp.liters).toFixed(1)}{exp.fuelType === FuelType.CNG ? 'm³' : 'L'}</span>
+                                {/* Usa o helper para exibir a unidade correta no histórico */}
+                                <span>{Number(exp.liters).toFixed(1)}{getFuelUnit(exp.fuelType)}</span>
                             </>
                           ) : (exp.description || exp.category)}
                     </p>

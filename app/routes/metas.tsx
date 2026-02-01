@@ -1,15 +1,15 @@
 // app/routes/metas.tsx
 
-import { useEffect, useState } from "react";
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, updateDoc, getDocs, orderBy, increment } from "firebase/firestore";
+import { useEffect, useState, useCallback } from "react";
 import { 
   Target, Plus, Trash2, Trophy, Rocket, Calendar, 
   TrendingUp, CheckCircle2, Car, Filter, Check, AlertTriangle, 
   DollarSign, X, History, Pencil, Wallet, ArrowRight, Info
 } from "lucide-react";
-import { db, auth } from "~/lib/app/firebase.client";
+import { supabase } from "~/lib/supabase.client"; // ✅ Supabase Client
 import { Platform } from "~/types/enums";
-import type { Goal, Vehicle } from "~/types/models";
+import type { Goal, Vehicle, Transaction } from "~/types/models";
+import type { User } from "@supabase/supabase-js";
 
 // === CSS UTILITÁRIO ===
 const noSpinnerClass = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
@@ -115,32 +115,39 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
         const fetchHistory = async () => {
             setLoadingHistory(true);
             try {
-                // Busca TODAS as transações vinculadas (Seja INCOME de corrida ou DEPOSIT manual)
-                const q = query(
-                    collection(db, "transactions"),
-                    where("linkedGoalId", "==", goal.id),
-                    orderBy("date", "desc")
-                );
-                const snap = await getDocs(q);
+                // Busca transações no Supabase vinculadas a esta meta
+                const { data, error } = await supabase
+                    .from("transactions")
+                    .select("*")
+                    .eq("linked_goal_id", goal.id)
+                    .order("date", { ascending: false });
+
+                if (error) throw error;
                 
                 // Mapeia transações
-                const linkedTransactions: any[] = snap.docs.map(d => ({ 
+                const linkedTransactions: any[] = (data || []).map(d => ({ 
                     id: d.id, 
-                    ...d.data(), 
-                    source: d.data().type === 'INCOME' ? 'TRANSACTION' : 'MANUAL' // Diferencia origem
+                    ...d,
+                    // Se description for 'Aporte Manual' ou type diferente de INCOME normal, trata como manual
+                    source: d.type === 'INCOME' && d.description !== 'Aporte Manual' ? 'TRANSACTION' : 'MANUAL' 
                 }));
                 
-                // Calcula se existe saldo "legado" (antes de começarmos a registrar transações manuais)
+                // Calcula saldo legado
                 const totalTracked = linkedTransactions.reduce((acc, curr: any) => acc + (curr.amount / 100), 0);
-                const legacyAmount = goal.currentAmount - totalTracked;
+                const legacyAmount = (goal.currentAmount / 100) - totalTracked; // goal.currentAmount já vem em centavos do banco, mas aqui no frontend tratamos divido por 100 em alguns locais? Vamos padronizar: goal.currentAmount vem em centavos do DB.
+                // Ajuste: No componente pai, currentAmount é centavos. Aqui, totalTracked é Reais.
+                // Vamos converter tudo para centavos para calcular.
+                
+                const totalTrackedCents = linkedTransactions.reduce((acc, curr: any) => acc + curr.amount, 0);
+                const legacyAmountCents = goal.currentAmount - totalTrackedCents;
                 
                 const finalHistory: any[] = [...linkedTransactions];
                 
                 // Adiciona entrada de legado se houver discrepância significativa (> 10 centavos)
-                if (legacyAmount > 0.10) {
+                if (legacyAmountCents > 10) {
                     finalHistory.push({
                         id: 'legacy-entry',
-                        amount: legacyAmount * 100, 
+                        amount: legacyAmountCents, 
                         description: 'Saldo Anterior / Inicial',
                         date: goal.createdAt, 
                         source: 'LEGACY'
@@ -162,7 +169,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
     const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
     const linkedCarNames = vehicles.filter((v: any) => goal.linkedVehicleIds?.includes(v.id)).map((v: any) => v.name);
-    const formatVal = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const formatVal = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
@@ -260,7 +267,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                                             </div>
                                         </div>
                                         <span className="text-emerald-400 font-bold text-sm">
-                                            +{formatVal(item.amount / 100)} 
+                                            +{formatVal(item.amount)} 
                                         </span>
                                     </div>
                                 ))}
@@ -293,6 +300,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 // === PÁGINA PRINCIPAL ===
 
 export default function MetasPage() {
+  const [user, setUser] = useState<User | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -317,23 +325,53 @@ export default function MetasPage() {
   const [purpose, setPurpose] = useState("");
   const [deadline, setDeadline] = useState("");
 
+  // === 0. AUTH ===
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      if (user) {
-        const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-        onSnapshot(qVehicles, (snap) => setVehicles(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[]));
-
-        const qGoals = query(collection(db, "goals"), where("userId", "==", user.uid));
-        const unsubscribeSnapshot = onSnapshot(qGoals, (snapshot) => {
-          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Goal[];
-          setGoals(data.sort((a, b) => (a.status === 'COMPLETED' ? 1 : -1)));
-          setLoading(false);
-        });
-        return () => unsubscribeSnapshot();
-      } else setLoading(false);
-    });
-    return () => unsubscribeAuth();
+    supabase.auth.getUser().then(({ data }) => setUser(data.user));
   }, []);
+
+  // === 1. FETCH VEÍCULOS & METAS (REALTIME) ===
+  const fetchData = useCallback(async () => {
+      if (!user) return;
+      setLoading(true);
+
+      // Fetch Vehicles
+      const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
+      if (vData) {
+          const mappedVehicles = vData.map(v => ({...v, userId: v.user_id}));
+          setVehicles(mappedVehicles as any);
+      }
+
+      // Fetch Goals
+      const { data: gData } = await supabase.from('goals').select('*').eq('user_id', user.id);
+      if (gData) {
+          const mappedGoals = gData.map(g => ({
+              ...g,
+              userId: g.user_id,
+              targetAmount: g.target_amount,
+              currentAmount: g.current_amount,
+              linkedVehicleIds: g.linked_vehicle_ids,
+              createdAt: g.created_at,
+              updatedAt: g.updated_at
+          }));
+          setGoals(mappedGoals.sort((a, b) => (a.status === 'COMPLETED' ? 1 : -1)) as any);
+      }
+      setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+      if (user) {
+          fetchData();
+          
+          // Realtime subscriptions
+          const goalsChannel = supabase.channel('realtime-goals-page')
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, () => fetchData())
+              .subscribe();
+          
+          return () => { supabase.removeChannel(goalsChannel); }
+      }
+  }, [user, fetchData]);
+
 
   const toggleVehicleSelection = (id: string) => {
     setSelectedVehicleIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
@@ -343,8 +381,8 @@ export default function MetasPage() {
       setEditingGoal(goal);
       setTitle(goal.title);
       setDescription(goal.description || "");
-      setTargetAmount(String(goal.targetAmount));
-      setCurrentAmount(String(goal.currentAmount));
+      setTargetAmount(String(goal.targetAmount / 100)); // DB stores cents, input expects float
+      setCurrentAmount(String(goal.currentAmount / 100));
       setPurpose(goal.purpose || "");
       setDeadline(goal.deadline || "");
       setSelectedVehicleIds(goal.linkedVehicleIds || []);
@@ -363,32 +401,35 @@ export default function MetasPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
+    if (!user) return;
     setIsSaving(true);
 
     try {
-      const initialCurrent = Number(currentAmount) || 0;
-      const target = Number(targetAmount);
+      // Inputs são float (ex: 10.50), DB espera centavos (1050)
+      const targetCents = Math.round(Number(targetAmount) * 100);
+      const currentCents = Math.round(Number(currentAmount) * 100) || 0;
       
       const goalData: any = {
-        userId: auth.currentUser.uid,
-        linkedVehicleIds: selectedVehicleIds, 
+        user_id: user.id,
+        linked_vehicle_ids: selectedVehicleIds, 
         title,
         description,
-        targetAmount: target,
-        currentAmount: initialCurrent,
+        target_amount: targetCents,
+        current_amount: currentCents,
         purpose,
-        deadline,
-        status: initialCurrent >= target ? 'COMPLETED' : 'ACTIVE',
-        updatedAt: new Date().toISOString()
+        deadline: deadline || null,
+        status: currentCents >= targetCents ? 'COMPLETED' : 'ACTIVE',
+        updated_at: new Date().toISOString()
       };
 
       if (!editingGoal) {
-          goalData.createdAt = new Date().toISOString();
-          await addDoc(collection(db, "goals"), goalData);
+          goalData.created_at = new Date().toISOString();
+          const { error } = await supabase.from('goals').insert(goalData);
+          if (error) throw error;
           setFeedback({ type: 'success', title: 'Meta Criada!', message: 'Seu objetivo foi criado com sucesso. 🚀' });
       } else {
-          await updateDoc(doc(db, "goals", editingGoal.id), goalData);
+          const { error } = await supabase.from('goals').update(goalData).eq('id', editingGoal.id);
+          if (error) throw error;
           setFeedback({ type: 'success', title: 'Meta Atualizada!', message: 'As alterações foram salvas.' });
           setEditingGoal(null);
       }
@@ -397,43 +438,47 @@ export default function MetasPage() {
       setIsSaving(false);
 
     } catch (error: any) {
+      console.error(error);
       setIsSaving(false);
-      setFeedback({ type: 'error', title: 'Erro', message: error.message });
+      setFeedback({ type: 'error', title: 'Erro', message: 'Erro ao salvar meta.' });
     }
   };
 
   const handleDeleteConfirm = async () => {
     if (goalToDeleteId) {
-      await deleteDoc(doc(db, "goals", goalToDeleteId));
+      await supabase.from('goals').delete().eq('id', goalToDeleteId);
       setGoalToDeleteId(null);
     }
   };
 
   // Função Auxiliar para registrar transação de aporte manual
   const registerDeposit = async (goal: Goal, amountVal: number) => {
-      if (!auth.currentUser) return;
+      if (!user) return;
       
-      // Cria registro de transação do tipo DEPOSIT (para histórico)
-      // Usamos um modelo compatível com Transaction, mas com campos específicos
-      await addDoc(collection(db, "transactions"), {
-          userId: auth.currentUser.uid,
-          vehicleId: null, // Aporte manual na meta não precisa estar atrelado a veículo na transação
-          linkedGoalId: goal.id,
-          amount: Math.round(amountVal * 100), // Salva em centavos
+      const amountCents = Math.round(amountVal * 100);
+
+      // 1. Cria transação de "Ganho" (INCOME) vinculada à meta
+      const { error: txError } = await supabase.from('transactions').insert({
+          user_id: user.id,
+          linked_goal_id: goal.id,
+          amount: amountCents,
           date: new Date().toISOString(),
-          type: 'DEPOSIT', // Novo tipo implícito ou usar INCOME com flag
+          type: 'INCOME', // Usamos INCOME para aportes
           description: 'Aporte Manual',
-          platform: Platform.PARTICULAR, // Placeholder para satisfazer tipagem se necessário
-          createdAt: new Date().toISOString()
+          platform: 'PARTICULAR', 
+          created_at: new Date().toISOString()
       });
 
-      // Atualiza saldo da meta
-      const newCurrent = goal.currentAmount + amountVal;
+      if (txError) throw txError;
+
+      // 2. Atualiza saldo da meta (Supabase não tem increment atômico fácil via JS client, então calculamos)
+      const newCurrent = goal.currentAmount + amountCents;
       const newStatus = newCurrent >= goal.targetAmount ? 'COMPLETED' : 'ACTIVE';
-      await updateDoc(doc(db, "goals", goal.id), { 
-          currentAmount: newCurrent, 
+      
+      await supabase.from('goals').update({ 
+          current_amount: newCurrent, 
           status: newStatus 
-      });
+      }).eq('id', goal.id);
   };
 
   const handleManualAdd = async (val: number) => {
@@ -443,7 +488,8 @@ export default function MetasPage() {
               setGoalToAddAmount(null);
               setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados à meta.` });
           } catch (error: any) {
-              setFeedback({ type: 'error', title: 'Erro', message: error.message });
+              console.error(error);
+              setFeedback({ type: 'error', title: 'Erro', message: 'Falha ao registrar aporte.' });
           }
       }
   };
@@ -453,11 +499,12 @@ export default function MetasPage() {
           await registerDeposit(goal, val);
           setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados.` });
       } catch (error: any) {
-          setFeedback({ type: 'error', title: 'Erro', message: error.message });
+          console.error(error);
+          setFeedback({ type: 'error', title: 'Erro', message: 'Falha ao registrar aporte.' });
       }
   };
 
-  const formatMoney = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const getProgress = (current: number, target: number) => Math.min(100, (current / target) * 100);
 
   const displayedGoals = goals.filter(g => {

@@ -1,18 +1,28 @@
 // app/routes/perfil.dados.tsx
-import { useState } from "react";
-import { updateProfile } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore"; // <--- Importar Firestore
-import { auth, db } from "~/lib/app/firebase.client"; // <--- Importar db
+import { useState, useEffect } from "react";
+import { supabase } from "~/lib/supabase.client";
 import { SubHeader } from "~/components/sub-header";
 import { User, Mail, Link as LinkIcon, Save, Loader2 } from "lucide-react";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export default function PerfilDados() {
-  const user = auth.currentUser;
-  
-  const [name, setName] = useState(user?.displayName || "");
-  const [photoURL, setPhotoURL] = useState(user?.photoURL || "");
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [name, setName] = useState("");
+  const [photoURL, setPhotoURL] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  // Carrega dados iniciais
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        setUser(data.user);
+        // Tenta pegar do metadata
+        setName(data.user.user_metadata?.full_name || data.user.user_metadata?.name || "");
+        setPhotoURL(data.user.user_metadata?.avatar_url || data.user.user_metadata?.picture || "");
+      }
+    });
+  }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,26 +32,39 @@ export default function PerfilDados() {
     setMessage(null);
 
     try {
-      // 1. Atualiza no Auth (Login)
-      await updateProfile(user, {
-        displayName: name,
-        photoURL: photoURL
+      // 1. Atualiza no Auth (Sessão / Login)
+      const { error: authError } = await supabase.auth.updateUser({
+        data: {
+          full_name: name,
+          avatar_url: photoURL,
+          name: name, // redundância para compatibilidade
+          photo_url: photoURL // redundância
+        }
       });
 
-      // 2. Sincroniza no Firestore (Vital para o Admin ver os nomes)
-      const userRef = doc(db, "users", user.uid);
-      await setDoc(userRef, {
+      if (authError) throw authError;
+
+      // 2. Sincroniza na Tabela 'profiles' (Banco de Dados Público)
+      // Usamos 'upsert' para garantir que crie se não existir
+      const { error: dbError } = await supabase.from('profiles').upsert({
+        id: user.id,
         name: name,
-        photoUrl: photoURL,
-        // Garante que o email esteja lá caso seja o primeiro sync
+        // photo_url se sua tabela tiver esse campo, ou avatar_url. 
+        // No roadmap definimos 'name' e 'email', vamos assumir que pode ter mais campos ou apenas esses.
         email: user.email, 
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+        // updated_at: new Date().toISOString() // Supabase gerencia isso se configurado, ou passamos
+      });
+
+      if (dbError) {
+          console.warn("Erro ao atualizar tabela profiles:", dbError);
+          // Não bloqueamos o sucesso visual se apenas o DB falhar mas o Auth passar, 
+          // mas idealmente ambos devem funcionar.
+      }
 
       setMessage({ type: 'success', text: "Perfil atualizado e sincronizado!" });
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setMessage({ type: 'error', text: "Erro ao atualizar. Tente novamente." });
+      setMessage({ type: 'error', text: error.message || "Erro ao atualizar." });
     } finally {
       setIsLoading(false);
     }

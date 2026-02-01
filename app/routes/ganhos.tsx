@@ -1,9 +1,6 @@
 // app/routes/ganhos.tsx
 
-import { useEffect, useState } from "react";
-import { 
-  collection, addDoc, deleteDoc, doc, query, where, onSnapshot, orderBy, limit, updateDoc, getDocs, increment, setDoc
-} from "firebase/firestore"; 
+import { useEffect, useState, useCallback } from "react";
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
@@ -12,9 +9,10 @@ import {
   Pencil, X, Save, Calendar, ExternalLink,
   Info, Target, Layers
 } from "lucide-react";
-import { db, auth } from "~/lib/app/firebase.client";
+import { supabase } from "~/lib/supabase.client"; // ✅ Cliente Supabase
 import { Platform } from "~/types/enums";
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
+import type { User } from "@supabase/supabase-js";
 
 // === TIPO LOCAL PARA SUPORTAR O SPLIT ===
 interface IncomeTransactionWithSplit extends IncomeTransaction {
@@ -229,11 +227,11 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
         date: new Date(`${formData.date}T00:00:00`).toISOString(),
-        distanceDriven: Number(formData.distanceDriven),
+        distance_driven: Number(formData.distanceDriven), // Mapeamento para snake_case
         odometer: Number(formData.odometer),
-        clusterKmPerLiter: Number(formData.clusterKmPerLiter),
-        onlineDurationMinutes: Math.round(Number(formData.onlineDurationMinutes) * 60),
-        tripsCount: Number(formData.tripsCount),
+        cluster_km_per_liter: Number(formData.clusterKmPerLiter), // Mapeamento para snake_case
+        online_duration_minutes: Math.round(Number(formData.onlineDurationMinutes) * 60), // Mapeamento para snake_case
+        trips_count: Number(formData.tripsCount), // Mapeamento para snake_case
         description: formData.description
       };
 
@@ -483,6 +481,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
 // === PÁGINA PRINCIPAL ===
 
 export default function GanhosPage() {
+  const [user, setUser] = useState<User | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [activeGoals, setActiveGoals] = useState<Goal[]>([]);
   const [recentGains, setRecentGains] = useState<IncomeTransactionWithSplit[]>([]);
@@ -520,6 +519,13 @@ export default function GanhosPage() {
   const [description, setDescription] = useState(""); 
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
+
+  // === 0. AUTENTICAÇÃO ===
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+        if (data.user) setUser(data.user);
+    });
+  }, []);
 
   // === EFEITO PARA SOMAR TOTAIS SE HOUVER MÚLTIPLOS APPS ===
   useEffect(() => {
@@ -562,96 +568,145 @@ export default function GanhosPage() {
     }));
   };
 
-  // === 1. BUSCAR DADOS INICIAIS ===
-  useEffect(() => {
-    const unsubAuth = auth.onAuthStateChanged((user) => {
-      if (user) {
-        // Veículos
-        const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-        const unsubVehicles = onSnapshot(qVehicles, (snap) => {
-          const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
-          setVehicles(data);
-          if (data.length > 0 && !selectedVehicle) {
-             setSelectedVehicle(data[0].id);
-          }
-        });
+  // === 1. FETCH E REALTIME: VEÍCULOS E PREFERÊNCIA ===
+  const fetchVehiclesAndPref = useCallback(async () => {
+    if (!user) return;
+    
+    // Busca veículos
+    const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
+    if (vData) {
+       const mappedVehicles = vData.map(v => ({
+          ...v,
+          userId: v.user_id, // Map snake_case
+          licensePlate: v.license_plate, // Map snake_case
+          currentOdometer: v.current_odometer, // Map snake_case
+          lastOdometerDate: v.last_odometer_date, // Map snake_case
+          isDefault: v.is_default // Map snake_case
+       }));
+       setVehicles(mappedVehicles as any);
 
-        // Preferência do Usuário
-        const userRef = doc(db, "users", user.uid);
-        const unsubUser = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const userData = docSnap.data();
-                if (userData.lastSelectedVehicleId) {
-                    setSelectedVehicle(userData.lastSelectedVehicleId);
-                }
+       // Se não tem selecionado, tenta pegar do perfil ou pega o primeiro
+       if (!selectedVehicle) {
+            const { data: pData } = await supabase.from('profiles').select('last_selected_vehicle_id').eq('id', user.id).single();
+            if (pData?.last_selected_vehicle_id) {
+                setSelectedVehicle(pData.last_selected_vehicle_id);
+            } else if (mappedVehicles.length > 0) {
+                setSelectedVehicle(mappedVehicles[0].id);
             }
-        });
+       }
+    }
+ }, [user, selectedVehicle]);
 
-        // Metas Ativas
-        const qGoals = query(
-             collection(db, "goals"), 
-             where("userId", "==", user.uid),
-             where("status", "==", "ACTIVE")
-        );
-        const unsubGoals = onSnapshot(qGoals, (snap) => {
-             setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
-        });
+ useEffect(() => {
+   if (user) {
+       fetchVehiclesAndPref();
+       // Assina mudanças na tabela de veículos para manter a lista atualizada (Realtime)
+       const channel = supabase.channel('realtime-vehicles')
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => {
+               fetchVehiclesAndPref();
+           })
+           .subscribe();
 
-        return () => {
-            unsubVehicles();
-            unsubUser();
-            unsubGoals();
-        };
+       return () => { supabase.removeChannel(channel); }
+   }
+ }, [user, fetchVehiclesAndPref]);
+
+  // === 2. FETCH E REALTIME: METAS ===
+  const fetchGoals = useCallback(async () => {
+      if (!user) return;
+      const { data, error } = await supabase.from('goals').select('*').eq('user_id', user.id).eq('status', 'ACTIVE');
+      if (!error && data) {
+          const mappedGoals = data.map(g => ({ 
+              ...g, 
+              userId: g.user_id,
+              targetAmount: g.target_amount, 
+              currentAmount: g.current_amount, 
+              linkedVehicleIds: g.linked_vehicle_ids 
+          }));
+          setActiveGoals(mappedGoals as any);
       }
-    });
-    return () => unsubAuth && unsubAuth();
-  }, []);
+  }, [user]);
 
-  // === 2. BUSCAR HISTÓRICO ===
   useEffect(() => {
-    if (!auth.currentUser || !selectedVehicle) return;
+    if (user) {
+        fetchGoals();
+        const channel = supabase.channel('realtime-goals')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, () => fetchGoals())
+            .subscribe();
+        return () => { supabase.removeChannel(channel); }
+    }
+  }, [user, fetchGoals]);
 
+  // === 3. FETCH E REALTIME: HISTÓRICO DE GANHOS ===
+  const fetchRecentGains = useCallback(async () => {
+    if (!user || !selectedVehicle) return;
     setLoading(true);
-    const qGains = query(
-      collection(db, "transactions"), 
-      where("userId", "==", auth.currentUser.uid),
-      where("vehicleId", "==", selectedVehicle),
-      where("type", "==", "INCOME"),
-      orderBy("date", "desc"),
-      limit(10)
-    );
 
-    const unsub = onSnapshot(qGains, (snap) => {
-      setRecentGains(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IncomeTransactionWithSplit[]);
-      setLoading(false);
-    });
+    const { data, error } = await supabase
+       .from('transactions')
+       .select('*')
+       .eq('user_id', user.id)
+       .eq('vehicle_id', selectedVehicle)
+       .eq('type', 'INCOME')
+       .order('date', { ascending: false })
+       .limit(10);
 
-    return () => unsub();
-  }, [selectedVehicle]);
+    if (!error && data) {
+       const mapped = data.map(t => ({
+           ...t,
+           userId: t.user_id,
+           vehicleId: t.vehicle_id,
+           distanceDriven: t.distance_driven,
+           onlineDurationMinutes: t.online_duration_minutes,
+           tripsCount: t.trips_count,
+           clusterKmPerLiter: t.cluster_km_per_liter,
+           linkedGoalId: t.linked_goal_id
+       }));
+       setRecentGains(mapped as any);
+    }
+    setLoading(false);
+ }, [user, selectedVehicle]);
+
+ useEffect(() => {
+   if (user && selectedVehicle) {
+       fetchRecentGains();
+
+       // Realtime para Transações
+       const channel = supabase.channel(`realtime-gains-${selectedVehicle}`)
+           .on('postgres_changes', 
+               { event: '*', schema: 'public', table: 'transactions', filter: `vehicle_id=eq.${selectedVehicle}` }, 
+               () => fetchRecentGains() // Recarrega a lista ao detectar mudança
+           )
+           .subscribe();
+
+       return () => { supabase.removeChannel(channel); }
+   }
+ }, [user, selectedVehicle, fetchRecentGains]);
+
 
   // === 3. PREÇO COMBUSTIVEL E ODÔMETRO ===
   useEffect(() => {
     if (!selectedVehicle) return;
     
-    // Preço
+    // Preço (Supabase)
     const fetchLastPrice = async () => {
-      const q = query(
-        collection(db, "transactions"),
-        where("vehicleId", "==", selectedVehicle),
-        where("category", "==", "FUEL"), 
-        orderBy("date", "desc"),
-        limit(1)
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        setLastFuelPrice(snap.docs[0].data().pricePerLiter || 0);
+      const { data } = await supabase.from('transactions')
+        .select('price_per_liter')
+        .eq('vehicle_id', selectedVehicle)
+        .eq('category', 'FUEL') 
+        .gt('price_per_liter', 0)
+        .order('date', { ascending: false })
+        .limit(1);
+
+      if (data && data.length > 0) {
+        setLastFuelPrice(Number(data[0].price_per_liter) || 0);
       } else {
         setLastFuelPrice(0);
       }
     };
     fetchLastPrice();
 
-    // Odômetro
+    // Odômetro (State Local dos Veículos)
     if (vehicles.length > 0) {
         const v = vehicles.find(vec => vec.id === selectedVehicle);
         if (v) {
@@ -687,7 +742,7 @@ export default function GanhosPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !selectedVehicle) return;
+    if (!user || !selectedVehicle) return;
     if (selectedPlatforms.length === 0) {
       setFeedback({ isOpen: true, type: 'error', title: 'Atenção', message: 'Selecione pelo menos uma plataforma.' });
       return;
@@ -720,44 +775,42 @@ export default function GanhosPage() {
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
       const transactionData: any = {
-        userId: auth.currentUser.uid,
-        vehicleId: selectedVehicle,
+        user_id: user.id,
+        vehicle_id: selectedVehicle,
         type: 'INCOME',
         platform: finalPlatform,
         amount: amountCents,
         date: new Date(`${date}T00:00:00`).toISOString(),
-        distanceDriven: drivenKm, 
-        onlineDurationMinutes: Math.round(hoursNum * 60),
-        tripsCount: tripsNum,
-        clusterKmPerLiter: avgNum,
+        distance_driven: drivenKm, 
+        online_duration_minutes: Math.round(hoursNum * 60),
+        trips_count: tripsNum,
+        cluster_km_per_liter: avgNum,
         odometer: finalOdometer, 
         description: description, 
-        createdAt: new Date().toISOString()
+        split: finalSplit ? finalSplit : undefined, // Supabase aceita JSONB diretamente
+        linked_goal_id: targetGoalId || null
       };
 
-      if (finalSplit) {
-        transactionData.split = finalSplit;
-      }
-
-      if (targetGoalId) {
-          transactionData.linkedGoalId = targetGoalId;
-      }
-
-      await addDoc(collection(db, "transactions"), transactionData);
+      await supabase.from('transactions').insert(transactionData);
 
       if (finalOdometer > startOdometer) {
-         const vehicleRef = doc(db, "vehicles", selectedVehicle);
-         await updateDoc(vehicleRef, {
-            currentOdometer: finalOdometer,
-            lastOdometerDate: new Date(`${date}T12:00:00`).toISOString(),
-            updatedAt: new Date().toISOString()
-         });
+         await supabase.from('vehicles').update({
+            current_odometer: finalOdometer,
+            last_odometer_date: new Date(`${date}T12:00:00`).toISOString(),
+            updated_at: new Date().toISOString()
+         }).eq('id', selectedVehicle);
       }
 
       if (targetGoalId && estimatedProfit > 0) {
-          await updateDoc(doc(db, "goals", targetGoalId), {
-              currentAmount: increment(estimatedProfit)
-          });
+          // Busca meta atual para incrementar (Supabase não tem atomic increment no client)
+          const { data: goal } = await supabase.from('goals').select('current_amount').eq('id', targetGoalId).single();
+          
+          if (goal) {
+              await supabase.from('goals').update({
+                  current_amount: goal.current_amount + estimatedProfit
+              }).eq('id', targetGoalId);
+          }
+
           setFeedback({
             isOpen: true,
             type: 'success',
@@ -793,8 +846,7 @@ export default function GanhosPage() {
 
   const handleUpdateTransaction = async (id: string, data: any) => {
      try {
-       const ref = doc(db, "transactions", id);
-       await updateDoc(ref, data);
+       await supabase.from('transactions').update(data).eq('id', id);
      } catch (error) {
        throw error;
      }
@@ -809,7 +861,7 @@ export default function GanhosPage() {
     if (!itemToDelete) return;
     setDeletingId(itemToDelete);
     try { 
-      await deleteDoc(doc(db, "transactions", itemToDelete)); 
+      await supabase.from('transactions').delete().eq('id', itemToDelete); 
     } catch (e) { 
       console.error(e); 
       setFeedback({
@@ -884,8 +936,8 @@ export default function GanhosPage() {
                     onChange={async (e) => {
                         const newId = e.target.value;
                         setSelectedVehicle(newId);
-                        if (auth.currentUser) {
-                            await setDoc(doc(db, "users", auth.currentUser.uid), { lastSelectedVehicleId: newId }, { merge: true });
+                        if (user) {
+                            await supabase.from('profiles').update({ last_selected_vehicle_id: newId }).eq('id', user.id);
                         }
                     }}
                     className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-emerald-500 outline-none appearance-none font-medium h-12"
