@@ -4,11 +4,53 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
   signInWithPopup, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  signOut 
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore"; // <--- Importado Firestore
+import { doc, setDoc, getDoc } from "firebase/firestore"; 
 import { useNavigate } from "react-router";
-import { auth, googleProvider, db } from "~/lib/firebase.client"; // <--- Importado db
+import { auth, googleProvider, db } from "~/lib/firebase.client"; 
+import { Lock, AlertTriangle } from "lucide-react"; // Certifique-se de ter lucide-react instalado ou use SVGs
+
+// === Sub-componente: Modal de Conta Bloqueada ===
+function BlockedAccountModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-gray-200 dark:border-zinc-800 relative">
+        <div className="flex flex-col items-center text-center">
+          <div className="h-16 w-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4 text-red-600 dark:text-red-500">
+            <Lock size={32} />
+          </div>
+          
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            Acesso Bloqueado
+          </h2>
+          
+          <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-6">
+            Sua conta está temporariamente suspensa. Por motivos de segurança ou pendências administrativas, você não pode acessar o sistema no momento.
+          </p>
+
+          <div className="w-full bg-gray-50 dark:bg-zinc-800/50 rounded-lg p-4 mb-6 border border-gray-100 dark:border-zinc-800 text-left flex items-start gap-3">
+             <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={18} />
+             <div className="text-sm">
+               <p className="font-semibold text-gray-700 dark:text-gray-300">Precisa de ajuda?</p>
+               <p className="text-gray-500 dark:text-gray-400 mt-1">Entre em contato com o suporte para regularizar sua situação.</p>
+             </div>
+          </div>
+
+          <button 
+            onClick={onClose}
+            className="w-full bg-gray-900 dark:bg-zinc-100 hover:bg-gray-800 text-white dark:text-gray-900 font-bold py-3 rounded-xl transition-all cursor-pointer shadow-lg hover:shadow-xl active:scale-[0.98]"
+          >
+            Entendido, voltar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -16,54 +58,72 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
   
   const navigate = useNavigate();
 
-  // 1. Redirecionamento Inteligente
+  // === Helper: Verifica Status e Atualiza Dados ===
+  const checkAndSyncUser = async (user: any) => {
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+    const now = new Date().toISOString();
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      
+      // 1. VERIFICAÇÃO DE BLOQUEIO
+      if (data.subscriptionStatus === 'BLOCKED') {
+        await signOut(auth); // Força logout
+        throw new Error("BLOCKED_USER");
+      }
+
+      // 2. Atualiza metadados se ativo
+      await setDoc(userRef, {
+        email: user.email,
+        name: user.displayName || data.name || "", 
+        photoUrl: user.photoURL || data.photoUrl || "",
+        lastLogin: now
+      }, { merge: true });
+
+    } else {
+      // 3. Novo Usuário (Cria como FREE e ACTIVE)
+      await setDoc(userRef, {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || "",
+        photoUrl: user.photoURL || "",
+        plan: "FREE",
+        subscriptionStatus: "ACTIVE",
+        createdAt: now,
+        lastLogin: now
+      });
+    }
+  };
+
+  // 1. Monitoramento de Auth (Redirecionamento Inteligente)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        navigate("/");
+        try {
+          // Verifica status antes de redirecionar automaticamente
+          // Isso previne que alguém bloqueado acesse via cookie antigo
+          const userRef = doc(db, "users", user.uid);
+          const snap = await getDoc(userRef);
+          
+          if (snap.exists() && snap.data().subscriptionStatus === 'BLOCKED') {
+            await signOut(auth);
+            setShowBlockedModal(true);
+            setLoading(false);
+          } else {
+            navigate("/");
+          }
+        } catch (e) {
+          console.error("Erro ao verificar sessão:", e);
+        }
       }
     });
     return () => unsubscribe();
   }, [navigate]);
-
-  // === HELPER: Sincronização Inteligente com Firestore ===
-  const syncUserToFirestore = async (user: any) => {
-    try {
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-
-      const now = new Date().toISOString();
-
-      if (userSnap.exists()) {
-        // USUÁRIO EXISTENTE:
-        // Atualiza apenas metadados (nome, foto, login) sem tocar no Plano
-        await setDoc(userRef, {
-          email: user.email,
-          name: user.displayName || userSnap.data().name || "", 
-          photoUrl: user.photoURL || userSnap.data().photoUrl || "",
-          lastLogin: now
-        }, { merge: true });
-      } else {
-        // NOVO USUÁRIO:
-        // Cria o documento com os defaults do SaaS (Free/Active)
-        await setDoc(userRef, {
-          uid: user.uid,
-          email: user.email,
-          name: user.displayName || "",
-          photoUrl: user.photoURL || "",
-          plan: "FREE",
-          subscriptionStatus: "ACTIVE",
-          createdAt: now,
-          lastLogin: now
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao sincronizar Firestore:", e);
-    }
-  };
 
   // 2. Função de Login com Google
   const handleGoogleLogin = async () => {
@@ -71,11 +131,15 @@ export default function Login() {
     setLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      await syncUserToFirestore(result.user); // <--- Sync automático
+      await checkAndSyncUser(result.user);
       navigate("/");
     } catch (err: any) {
       console.error(err);
-      setError("Erro ao autenticar com Google.");
+      if (err.message === "BLOCKED_USER") {
+        setShowBlockedModal(true);
+      } else {
+        setError("Erro ao autenticar com Google.");
+      }
       setLoading(false);
     }
   };
@@ -94,11 +158,20 @@ export default function Login() {
         result = await createUserWithEmailAndPassword(auth, email, password);
       }
       
-      // Sincroniza independente se foi login ou cadastro
-      await syncUserToFirestore(result.user); 
+      await checkAndSyncUser(result.user); 
       navigate("/"); 
+
     } catch (err: any) {
       console.error(err);
+      
+      // Tratamento específico para bloqueio
+      if (err.message === "BLOCKED_USER") {
+        setShowBlockedModal(true);
+        setLoading(false);
+        return;
+      }
+
+      // Erros padrões do Firebase
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found') {
         setError("E-mail ou senha incorretos.");
       } else if (err.code === 'auth/email-already-in-use') {
@@ -108,13 +181,18 @@ export default function Login() {
       } else {
         setError("Ocorreu um erro. Tente novamente.");
       }
-    } finally {
       setLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950 text-gray-100 p-4">
+      {/* Modal de Bloqueio */}
+      <BlockedAccountModal 
+        isOpen={showBlockedModal} 
+        onClose={() => setShowBlockedModal(false)} 
+      />
+
       <div className="w-full max-w-md bg-gray-900 p-8 rounded-xl border border-gray-800 shadow-2xl">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-emerald-500 mb-2">Financial Hub</h1>
@@ -124,7 +202,8 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-500 p-3 rounded mb-4 text-sm text-center">
+          <div className="bg-red-500/10 border border-red-500/50 text-red-500 p-3 rounded mb-4 text-sm text-center flex items-center justify-center gap-2">
+            <AlertTriangle size={16} />
             {error}
           </div>
         )}
@@ -134,7 +213,7 @@ export default function Login() {
           onClick={handleGoogleLogin}
           type="button"
           disabled={loading}
-          className="w-full bg-white text-gray-900 font-bold py-3 rounded-lg mb-4 flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors disabled:opacity-50"
+          className="w-full bg-white text-gray-900 font-bold py-3 rounded-lg mb-4 flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path
@@ -172,7 +251,7 @@ export default function Login() {
             <input
               type="email"
               required
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
               placeholder="seu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -184,7 +263,7 @@ export default function Login() {
             <input
               type="password"
               required
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -194,7 +273,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all disabled:opacity-50"
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all disabled:opacity-50 cursor-pointer shadow-lg hover:shadow-emerald-500/20 active:scale-[0.98]"
           >
             {loading ? "Carregando..." : (isLogin ? "Acessar Sistema" : "Criar Conta")}
           </button>
@@ -203,7 +282,7 @@ export default function Login() {
         <div className="mt-6 text-center">
           <button
             onClick={() => setIsLogin(!isLogin)}
-            className="text-sm text-emerald-400 hover:text-emerald-300 underline"
+            className="text-sm text-emerald-400 hover:text-emerald-300 underline cursor-pointer transition-colors"
           >
             {isLogin ? "Não tem conta? Cadastre-se" : "Já tem conta? Faça Login"}
           </button>

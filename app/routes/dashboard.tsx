@@ -285,7 +285,22 @@ export default function Dashboard() {
         dayData.income += val;
         
         const inc = t as IncomeTransaction;
-        platformIncome[inc.platform] = (platformIncome[inc.platform] || 0) + val;
+
+        // === INICIO DA ALTERAÇÃO ===
+        // Se for MULTIPLE, usamos o split para somar no app correto (Uber, 99, etc)
+        // Isso corrige a estatística de "Melhor App" sem duplicar o KM
+        if (inc.platform === 'MULTIPLE' && inc.split && inc.split.length > 0) {
+           inc.split.forEach(item => {
+              // Converte centavos para reais
+              const itemVal = item.amount / 100;
+              // Soma no acumulador daquele app específico
+              platformIncome[item.platform] = (platformIncome[item.platform] || 0) + itemVal;
+           });
+        } else {
+           // Comportamento padrão (apenas 1 app)
+           platformIncome[inc.platform] = (platformIncome[inc.platform] || 0) + val;
+        }
+        // === FIM DA ALTERAÇÃO ===
 
         if (inc.distanceDriven) km += Number(inc.distanceDriven);
         if (inc.onlineDurationMinutes) minutes += Number(inc.onlineDurationMinutes);
@@ -427,19 +442,19 @@ export default function Dashboard() {
                         onClick={() => handleChangeVehicle(v.id)}
                         className={`w-full flex items-center gap-4 px-4 py-3 hover:bg-gray-800 transition-colors ${selectedVehicleId === v.id ? 'bg-gray-800 border-l-4 border-emerald-500' : ''}`}
                       >
-                         {/* LOGO NA LISTA (AUMENTADO w-12 h-12 E SEM FILTRO DE COR) */}
-                         <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center p-1 shrink-0 shadow-sm">
-                            <img 
-                                src={getBrandLogo(v.brand)} 
-                                alt={v.brand}
-                                className="w-full h-full object-contain" 
-                                // Removido filtro grayscale para cores reais
-                            />
-                         </div>
-                         <div className="text-left">
-                            <p className="text-white font-bold text-base">{v.name}</p>
-                            <p className="text-gray-500 text-xs uppercase font-medium">{v.brand} {v.model}</p>
-                         </div>
+                          {/* LOGO NA LISTA (AUMENTADO w-12 h-12 E SEM FILTRO DE COR) */}
+                          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center p-1 shrink-0 shadow-sm">
+                             <img 
+                                 src={getBrandLogo(v.brand)} 
+                                 alt={v.brand}
+                                 className="w-full h-full object-contain" 
+                                 // Removido filtro grayscale para cores reais
+                             />
+                          </div>
+                          <div className="text-left">
+                             <p className="text-white font-bold text-base">{v.name}</p>
+                             <p className="text-gray-500 text-xs uppercase font-medium">{v.brand} {v.model}</p>
+                          </div>
                       </button>
                     ))}
                   </div>

@@ -10,11 +10,20 @@ import {
   LayoutGrid, ChevronUp, Trash2, Gauge,
   AlertTriangle, Navigation, FileText,
   Pencil, X, Save, Calendar, ExternalLink,
-  Info, Target 
+  Info, Target, Layers
 } from "lucide-react";
 import { db, auth } from "~/lib/firebase.client";
 import { Platform } from "~/types/enums";
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
+
+// === TIPO LOCAL PARA SUPORTAR O SPLIT ===
+interface IncomeTransactionWithSplit extends IncomeTransaction {
+  split?: {
+    platform: Platform;
+    amount: number;
+    trips?: number;
+  }[];
+}
 
 // === CONFIGURAÇÃO DAS PLATAFORMAS ===
 const ALL_PLATFORMS = [
@@ -63,9 +72,18 @@ const ALL_PLATFORMS = [
   },
 ];
 
+// Configuração Visual para MULTIPLE
+const MULTIPLE_PLATFORM_CONFIG = {
+  id: 'MULTIPLE',
+  label: 'Múltiplos Apps',
+  icon: <Layers size={32} className="text-white" />, // Icone maior para o header
+  bg: 'bg-indigo-600',
+  textColor: 'text-white'
+};
+
 // === COMPONENTES AUXILIARES ===
 
-// --- NOVO COMPONENTE DE FEEDBACK (SUBSTITUI O ALERT) ---
+// --- COMPONENTE DE FEEDBACK ---
 function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: any) {
   if (!isOpen) return null;
 
@@ -131,15 +149,18 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-// === NOVO MODAL DE DETALHES E EDIÇÃO ===
-function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
+// === MODAL DE DETALHES E EDIÇÃO ===
+function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { isOpen: boolean, onClose: () => void, transaction: IncomeTransactionWithSplit | null, onUpdate: any }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
-  const [saving, setSaving] = useState(false);
   
-  // Estado Local para Feedback (Erro de Edição)
+  // Estado para os splits editáveis
+  const [splitFormData, setSplitFormData] = useState<any[]>([]);
+
+  const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
 
+  // Carrega os dados quando a transação muda ou o modal abre
   useEffect(() => {
     if (transaction) {
       setFormData({
@@ -152,18 +173,60 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
         tripsCount: transaction.tripsCount || 0,
         description: transaction.description || ""
       });
+
+      // Carrega o split e converte centavos para reais (string)
+      if (transaction.split && transaction.split.length > 0) {
+        setSplitFormData(transaction.split.map(s => ({
+            ...s,
+            amount: (s.amount / 100).toFixed(2),
+            trips: s.trips || 0
+        })));
+      } else {
+        setSplitFormData([]);
+      }
+
       setIsEditing(false);
     }
   }, [transaction]);
 
+  // Recalcula totais quando o splitFormData é alterado durante a edição
+  useEffect(() => {
+    if (isEditing && splitFormData.length > 0) {
+        let totalAmount = 0;
+        let totalTrips = 0;
+
+        splitFormData.forEach(item => {
+            totalAmount += parseFloat(item.amount?.toString().replace(',', '.') || "0");
+            totalTrips += parseInt(item.trips || "0");
+        });
+
+        setFormData((prev: any) => ({
+            ...prev,
+            amount: totalAmount.toFixed(2),
+            tripsCount: totalTrips
+        }));
+    }
+  }, [splitFormData, isEditing]);
+
   if (!isOpen || !transaction) return null;
 
-  const platformInfo = ALL_PLATFORMS.find(p => p.id === transaction.platform) || ALL_PLATFORMS[5];
+  const isMultiple = (transaction.platform as string) === 'MULTIPLE';
+  
+  // Lógica correta para pegar configuração
+  const platformInfo = isMultiple 
+      ? MULTIPLE_PLATFORM_CONFIG 
+      : ALL_PLATFORMS.find(p => p.id === transaction.platform) || ALL_PLATFORMS[5];
+
+  const handleUpdateSplitField = (index: number, field: 'amount' | 'trips', value: string) => {
+    const newSplit = [...splitFormData];
+    newSplit[index] = { ...newSplit[index], [field]: value };
+    setSplitFormData(newSplit);
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updates = {
+      const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
         date: new Date(`${formData.date}T00:00:00`).toISOString(),
         distanceDriven: Number(formData.distanceDriven),
@@ -173,6 +236,16 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
         tripsCount: Number(formData.tripsCount),
         description: formData.description
       };
+
+      // Se for múltiplo, precisamos salvar o split atualizado
+      if (isMultiple && splitFormData.length > 0) {
+        updates.split = splitFormData.map(item => ({
+            platform: item.platform,
+            amount: Math.round(parseFloat(item.amount.toString().replace(',', '.')) * 100),
+            trips: Number(item.trips)
+        }));
+      }
+
       await onUpdate(transaction.id, updates);
       setIsEditing(false);
     } catch (error) {
@@ -188,15 +261,16 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
     }
   };
 
-  const InputField = ({ label, field, type = "number", step="any" }: any) => (
-    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
+  const InputField = ({ label, field, type = "number", step="any", readOnly = false }: any) => (
+    <div className={`bg-gray-800/50 p-2 rounded-lg border border-gray-700 ${readOnly ? 'opacity-60' : ''}`}>
       <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
       <input 
         type={type} 
         step={step}
+        readOnly={readOnly}
         value={formData[field]} 
-        onChange={e => setFormData({...formData, [field]: e.target.value})}
-        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
+        onChange={e => !readOnly && setFormData({...formData, [field]: e.target.value})}
+        className={`w-full bg-transparent text-white font-bold outline-none border-b text-sm py-1 ${readOnly ? 'border-transparent cursor-not-allowed' : 'border-gray-600 focus:border-emerald-500'}`}
       />
     </div>
   );
@@ -214,7 +288,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       
-      {/* Modal de Feedback Interno */}
       {feedback && (
           <FeedbackModal 
              isOpen={feedback.isOpen} 
@@ -234,14 +307,19 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
            </button>
            
            <div className="flex flex-col items-center">
-              <div className="w-16 h-16 bg-white rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4">
-                  {platformInfo.logo ? <img src={platformInfo.logo} className="w-full object-contain" /> : platformInfo.icon}
+              <div className={`w-16 h-16 rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4 overflow-hidden ${isMultiple ? 'bg-indigo-500/50 backdrop-blur-sm border border-white/20' : 'bg-white'}`}>
+                  {/* Lógica de Renderização do Ícone/Logo */}
+                  {isMultiple ? (
+                    platformInfo.icon // Renderiza o <Layers />
+                  ) : (
+                    (platformInfo as any).logo ? <img src={(platformInfo as any).logo} className="w-full object-contain" /> : platformInfo.icon
+                  )}
               </div>
               <h2 className={`text-2xl font-bold ${platformInfo.textColor === 'text-black' ? 'text-gray-900' : 'text-white'}`}>
                 {platformInfo.label}
               </h2>
               <div className={`text-sm font-medium opacity-80 ${platformInfo.textColor === 'text-black' ? 'text-gray-800' : 'text-gray-300'}`}>
-                 Detalhes do Lançamento
+                 {isEditing ? 'Editando Lançamento' : 'Detalhes do Lançamento'}
               </div>
            </div>
         </div>
@@ -250,8 +328,44 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
            {isEditing ? (
               <div className="grid grid-cols-2 gap-3">
+                 
+                 {/* SE FOR MULTIPLE: MOSTRA CAMPOS DE EDIÇÃO INDIVIDUAL */}
+                 {isMultiple && splitFormData.length > 0 && (
+                    <div className="col-span-2 space-y-2 mb-2 bg-gray-800/30 p-3 rounded-xl border border-dashed border-gray-700">
+                        <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-1">
+                             <Layers size={10} /> Editar Valores por App
+                        </h4>
+                        {splitFormData.map((item, idx) => {
+                            const appInfo = ALL_PLATFORMS.find(p => p.id === item.platform) || ALL_PLATFORMS[5];
+                            return (
+                                <div key={idx} className="flex gap-2 items-center mb-2">
+                                    <div className="w-20 text-xs text-white font-bold truncate">{appInfo.label}</div>
+                                    <div className="flex-1">
+                                        <input 
+                                            type="number" step="0.01" 
+                                            value={item.amount}
+                                            onChange={(e) => handleUpdateSplitField(idx, 'amount', e.target.value)}
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="R$"
+                                        />
+                                    </div>
+                                    <div className="w-16">
+                                        <input 
+                                            type="number"
+                                            value={item.trips}
+                                            onChange={(e) => handleUpdateSplitField(idx, 'trips', e.target.value)}
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+                                            placeholder="Viagens"
+                                        />
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                 )}
+
                  <div className="col-span-2">
-                    <InputField label="Valor (R$)" field="amount" step="0.01" />
+                    <InputField label={isMultiple ? "Valor Total (Calculado)" : "Valor (R$)"} field="amount" step="0.01" readOnly={isMultiple} />
                  </div>
                  <div className="col-span-2">
                     <InputField label="Data" field="date" type="date" />
@@ -260,7 +374,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
                  <InputField label="Odômetro" field="odometer" />
                  <InputField label="Média Painel" field="clusterKmPerLiter" step="0.1" />
                  <InputField label="Horas Online" field="onlineDurationMinutes" step="0.1" />
-                 <InputField label="Viagens" field="tripsCount" />
+                 <InputField label={isMultiple ? "Viagens Total" : "Viagens"} field="tripsCount" readOnly={isMultiple} />
                  <div className="col-span-2">
                    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
                       <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">Observação</label>
@@ -274,7 +388,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
                  </div>
               </div>
            ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                  <div className="text-center mb-6">
                     <span className="text-4xl font-bold text-emerald-400">
                        {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -284,12 +398,40 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
                     </p>
                  </div>
 
+                 {/* DETALHAMENTO DO SPLIT (VIEW MODE) */}
+                 {isMultiple && transaction.split && (
+                   <div className="bg-gray-800/40 rounded-xl p-3 border border-gray-700/50 space-y-2">
+                      <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-1">
+                        <Layers size={10} /> Detalhamento por App
+                      </h4>
+                      {transaction.split.map((item, idx) => {
+                        const appInfo = ALL_PLATFORMS.find(p => p.id === item.platform) || ALL_PLATFORMS[5];
+                        return (
+                          <div key={idx} className="flex items-center justify-between py-2 border-b border-gray-700/50 last:border-0">
+                             <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white p-1 shadow-sm flex items-center justify-center">
+                                  {appInfo.logo ? <img src={appInfo.logo} className="w-full h-full object-contain"/> : <Briefcase size={14} className="text-gray-800"/>}
+                                </div>
+                                <div>
+                                   <p className="text-white text-xs font-bold">{appInfo.label}</p>
+                                   <p className="text-gray-500 text-[10px]">{item.trips} viagens</p>
+                                </div>
+                             </div>
+                             <span className="text-emerald-400 font-bold text-sm">
+                               {(item.amount / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                             </span>
+                          </div>
+                        )
+                      })}
+                   </div>
+                 )}
+
                  <div className="grid grid-cols-2 gap-3">
                     <DisplayField label="KM Trip" value={`${formData.distanceDriven} km`} icon={Map} color="text-blue-500" />
                     <DisplayField label="Odômetro" value={`${formData.odometer} km`} icon={Navigation} color="text-emerald-500" />
                     <DisplayField label="Média" value={`${formData.clusterKmPerLiter} km/l`} icon={Gauge} color="text-orange-500" />
                     <DisplayField label="Duração" value={`${formData.onlineDurationMinutes} h`} icon={Clock} color="text-yellow-500" />
-                    <DisplayField label="Viagens" value={formData.tripsCount} icon={Briefcase} color="text-purple-500" />
+                    <DisplayField label="Viagens Totais" value={formData.tripsCount} icon={Briefcase} color="text-purple-500" />
                  </div>
 
                  {formData.description && (
@@ -342,8 +484,8 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: any
 
 export default function GanhosPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [activeGoals, setActiveGoals] = useState<Goal[]>([]); // <--- NOVA LISTA DE METAS
-  const [recentGains, setRecentGains] = useState<IncomeTransaction[]>([]);
+  const [activeGoals, setActiveGoals] = useState<Goal[]>([]);
+  const [recentGains, setRecentGains] = useState<IncomeTransactionWithSplit[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -352,57 +494,100 @@ export default function GanhosPage() {
   const [lastFuelPrice, setLastFuelPrice] = useState(0); 
   
   // ESTADO PARA O MODAL DE DETALHES
-  const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransaction | null>(null);
+  const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransactionWithSplit | null>(null);
 
-  // NOVO: Estado para Feedback Modal Global (Sucesso ou Erro na Page)
+  // NOVO: Feedback Global
   const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
 
-  // Estados do Formulário
+  // === ESTADOS DO FORMULÁRIO ===
   const [selectedVehicle, setSelectedVehicle] = useState("");
-  const [selectedPlatform, setSelectedPlatform] = useState<Platform>(Platform.UBER);
-  const [targetGoalId, setTargetGoalId] = useState(""); // <--- ESTADO PARA A META SELECIONADA
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   
-  // Métricas
+  // SELEÇÃO MÚLTIPLA
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]); // Array para múltipla escolha
+  const [splitData, setSplitData] = useState<{[key: string]: { amount: string, trips: string }}>({}); // Dados individuais por app
+
+  const [targetGoalId, setTargetGoalId] = useState("");
+  
+  // Totais (Calculados ou inseridos)
+  const [amount, setAmount] = useState("");
+  const [trips, setTrips] = useState("");
+  
+  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [distance, setDistance] = useState(""); 
   const [odometerInput, setOdometerInput] = useState(""); 
   const [clusterAvg, setClusterAvg] = useState(""); 
   const [hours, setHours] = useState("");
-  const [trips, setTrips] = useState("");
   const [description, setDescription] = useState(""); 
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
-  // === 1. BUSCAR VEÍCULOS, METAS E PREFERÊNCIA ===
+  // === EFEITO PARA SOMAR TOTAIS SE HOUVER MÚLTIPLOS APPS ===
+  useEffect(() => {
+    if (selectedPlatforms.length > 1) {
+      let totalAmount = 0;
+      let totalTrips = 0;
+
+      selectedPlatforms.forEach(pId => {
+        const data = splitData[pId];
+        if (data) {
+          totalAmount += parseFloat(data.amount.replace(',', '.')) || 0;
+          totalTrips += parseInt(data.trips) || 0;
+        }
+      });
+
+      setAmount(totalAmount > 0 ? totalAmount.toFixed(2) : "");
+      setTrips(totalTrips > 0 ? totalTrips.toString() : "");
+    }
+  }, [splitData, selectedPlatforms]);
+
+  // Função para alternar seleção de plataforma
+  const togglePlatform = (id: Platform) => {
+    setSelectedPlatforms(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(p => p !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  };
+
+  // Função para atualizar dados do split
+  const updateSplitData = (platformId: string, field: 'amount' | 'trips', value: string) => {
+    setSplitData(prev => ({
+      ...prev,
+      [platformId]: {
+        ...prev[platformId],
+        [field]: value
+      }
+    }));
+  };
+
+  // === 1. BUSCAR DADOS INICIAIS ===
   useEffect(() => {
     const unsubAuth = auth.onAuthStateChanged((user) => {
       if (user) {
-        // A. Veículos
+        // Veículos
         const qVehicles = query(collection(db, "vehicles"), where("userId", "==", user.uid));
         const unsubVehicles = onSnapshot(qVehicles, (snap) => {
           const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
           setVehicles(data);
-          
-          // Fallback: Se não tiver veículo selecionado, pega o primeiro da lista
           if (data.length > 0 && !selectedVehicle) {
              setSelectedVehicle(data[0].id);
           }
         });
 
-        // B. Preferência do Usuário (PERSISTÊNCIA)
+        // Preferência do Usuário
         const userRef = doc(db, "users", user.uid);
         const unsubUser = onSnapshot(userRef, (docSnap) => {
             if (docSnap.exists()) {
                 const userData = docSnap.data();
-                // Se existe uma preferência salva, aplica ela
                 if (userData.lastSelectedVehicleId) {
                     setSelectedVehicle(userData.lastSelectedVehicleId);
                 }
             }
         });
 
-        // C. Metas Ativas
+        // Metas Ativas
         const qGoals = query(
              collection(db, "goals"), 
              where("userId", "==", user.uid),
@@ -412,7 +597,6 @@ export default function GanhosPage() {
              setActiveGoals(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Goal[]);
         });
 
-        // Cleanup dos listeners internos
         return () => {
             unsubVehicles();
             unsubUser();
@@ -423,7 +607,7 @@ export default function GanhosPage() {
     return () => unsubAuth && unsubAuth();
   }, []);
 
-  // === 2. BUSCAR HISTÓRICO DE GANHOS DO VEÍCULO SELECIONADO ===
+  // === 2. BUSCAR HISTÓRICO ===
   useEffect(() => {
     if (!auth.currentUser || !selectedVehicle) return;
 
@@ -438,17 +622,18 @@ export default function GanhosPage() {
     );
 
     const unsub = onSnapshot(qGains, (snap) => {
-      setRecentGains(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IncomeTransaction[]);
+      setRecentGains(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IncomeTransactionWithSplit[]);
       setLoading(false);
     });
 
     return () => unsub();
   }, [selectedVehicle]);
 
-  // === BUSCAR ÚLTIMO PREÇO DE COMBUSTÍVEL DO VEÍCULO SELECIONADO ===
+  // === 3. PREÇO COMBUSTIVEL E ODÔMETRO ===
   useEffect(() => {
     if (!selectedVehicle) return;
     
+    // Preço
     const fetchLastPrice = async () => {
       const q = query(
         collection(db, "transactions"),
@@ -457,29 +642,22 @@ export default function GanhosPage() {
         orderBy("date", "desc"),
         limit(1)
       );
-      
       const snap = await getDocs(q);
       if (!snap.empty) {
-        const data = snap.docs[0].data();
-        setLastFuelPrice(data.pricePerLiter || 0);
+        setLastFuelPrice(snap.docs[0].data().pricePerLiter || 0);
       } else {
         setLastFuelPrice(0);
       }
     };
-    
     fetchLastPrice();
-  }, [selectedVehicle]);
 
-  // === SINCRONIZA ODÔMETRO INICIAL QUANDO TROCA DE VEÍCULO ===
-  useEffect(() => {
-      if (selectedVehicle && vehicles.length > 0) {
-          const v = vehicles.find(vec => vec.id === selectedVehicle);
-          if (v) {
-              const current = v.currentOdometer || 0;
-              // ATUALIZADO: Agora sempre atualiza o input quando o veículo muda
-              setOdometerInput(String(current));
-          }
-      }
+    // Odômetro
+    if (vehicles.length > 0) {
+        const v = vehicles.find(vec => vec.id === selectedVehicle);
+        if (v) {
+            setOdometerInput(String(v.currentOdometer || 0));
+        }
+    }
   }, [selectedVehicle, vehicles]);
 
   const preventNegativeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -488,19 +666,17 @@ export default function GanhosPage() {
     }
   };
 
-  // === CÁLCULOS EM TEMPO REAL (Monitor de Eficiência) ===
+  // === CÁLCULOS ===
   const tripKm = parseFloat(distance) || 0;
   const panelAvg = parseFloat(clusterAvg) || 0;
   
-  // (Trip / Média Painel) * Preço Combustível
   const estimatedCost = (panelAvg > 0 && lastFuelPrice > 0) 
       ? (tripKm / panelAvg) * lastFuelPrice 
       : 0;
   
   const currentIncome = parseFloat(amount.replace(',', '.')) || 0;
-  const estimatedProfit = currentIncome - estimatedCost; // <--- VALOR PARA A META
+  const estimatedProfit = currentIncome - estimatedCost;
 
-  // === FILTRO DE METAS (Seletor Inteligente) ===
   const goalsForThisVehicle = activeGoals.filter(g => 
     !g.linkedVehicleIds || 
     g.linkedVehicleIds.length === 0 || 
@@ -512,44 +688,63 @@ export default function GanhosPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !selectedVehicle) return;
+    if (selectedPlatforms.length === 0) {
+      setFeedback({ isOpen: true, type: 'error', title: 'Atenção', message: 'Selecione pelo menos uma plataforma.' });
+      return;
+    }
+
     setSaving(true);
 
     try {
       const amountCents = Math.round(parseFloat(amount.replace(',', '.')) * 100);
       const hoursNum = parseFloat(hours.replace(',', '.')) || 0;
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
-      
       const drivenKm = Number(distance) || 0;          
       const finalOdometer = Number(odometerInput) || 0; 
+      const tripsNum = Number(trips) || 0;
+
+      // DEFINIR PLATAFORMA E SPLIT
+      let finalPlatform = selectedPlatforms[0];
+      let finalSplit = null;
+
+      if (selectedPlatforms.length > 1) {
+          finalPlatform = 'MULTIPLE' as Platform;
+          finalSplit = selectedPlatforms.map(pId => ({
+              platform: pId,
+              amount: Math.round(parseFloat(splitData[pId]?.amount?.replace(',', '.') || "0") * 100),
+              trips: Number(splitData[pId]?.trips || 0)
+          }));
+      }
 
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
-      // Dados da Transação
       const transactionData: any = {
         userId: auth.currentUser.uid,
         vehicleId: selectedVehicle,
         type: 'INCOME',
-        platform: selectedPlatform,
+        platform: finalPlatform,
         amount: amountCents,
         date: new Date(`${date}T00:00:00`).toISOString(),
         distanceDriven: drivenKm, 
         onlineDurationMinutes: Math.round(hoursNum * 60),
-        tripsCount: Number(trips) || 0,
+        tripsCount: tripsNum,
         clusterKmPerLiter: avgNum,
         odometer: finalOdometer, 
         description: description, 
         createdAt: new Date().toISOString()
       };
 
-      // Vínculo com a Meta (Se selecionado)
+      if (finalSplit) {
+        transactionData.split = finalSplit;
+      }
+
       if (targetGoalId) {
           transactionData.linkedGoalId = targetGoalId;
       }
 
       await addDoc(collection(db, "transactions"), transactionData);
 
-      // Atualizar Veículo (Odômetro)
       if (finalOdometer > startOdometer) {
          const vehicleRef = doc(db, "vehicles", selectedVehicle);
          await updateDoc(vehicleRef, {
@@ -559,23 +754,19 @@ export default function GanhosPage() {
          });
       }
 
-      // === LÓGICA DE DEPÓSITO AUTOMÁTICO NA META ===
       if (targetGoalId && estimatedProfit > 0) {
-          // Incrementa atomicamente o valor na meta
           await updateDoc(doc(db, "goals", targetGoalId), {
               currentAmount: increment(estimatedProfit)
           });
-          
-          // Feedback Visual Solicitado (MODAL MODERNO)
           setFeedback({
             isOpen: true,
             type: 'success',
             title: 'Meta Atualizada!',
-            // CORRIGIDO: Removido o R$ duplicado (toLocaleString já inclui)
             message: `Sucesso! ${estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} foram destinados para a meta! 🎯`
           });
       }
 
+      // RESET
       setAmount("");
       setDistance("");
       setOdometerInput(""); 
@@ -583,7 +774,10 @@ export default function GanhosPage() {
       setTrips("");
       setClusterAvg(""); 
       setDescription(""); 
-      setTargetGoalId(""); // Resetar seleção de meta
+      setTargetGoalId(""); 
+      setSelectedPlatforms([]);
+      setSplitData({});
+      
       setSaving(false);
     } catch (error) {
       console.error(error);
@@ -607,7 +801,7 @@ export default function GanhosPage() {
   };
 
   const handleRequestDelete = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation(); // Impede abrir o modal de detalhes
+    e.stopPropagation();
     setItemToDelete(id);
   };
 
@@ -632,7 +826,12 @@ export default function GanhosPage() {
 
   const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatMoneyFloat = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const getPlatformDetails = (id: string) => ALL_PLATFORMS.find(p => p.id === id) || ALL_PLATFORMS[5];
+  
+  // Função atualizada para retornar dados de MULTIPLE se necessário
+  const getPlatformDetails = (id: string) => {
+    if (id === 'MULTIPLE') return MULTIPLE_PLATFORM_CONFIG;
+    return ALL_PLATFORMS.find(p => p.id === id) || ALL_PLATFORMS[5];
+  };
 
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -670,7 +869,7 @@ export default function GanhosPage() {
             <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
               <Zap className="text-yellow-500 fill-yellow-500" size={28} /> Registrar Ganho
             </h1>
-            <p className="text-gray-400 text-sm md:text-base">Selecione o app e lance o faturamento.</p>
+            <p className="text-gray-400 text-sm md:text-base">Selecione o(s) app(s) e lance o faturamento.</p>
           </header>
 
           <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
@@ -685,7 +884,6 @@ export default function GanhosPage() {
                     onChange={async (e) => {
                         const newId = e.target.value;
                         setSelectedVehicle(newId);
-                        // Salva a preferência no Firestore
                         if (auth.currentUser) {
                             await setDoc(doc(db, "users", auth.currentUser.uid), { lastSelectedVehicleId: newId }, { merge: true });
                         }
@@ -699,17 +897,19 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* PLATAFORMA */}
+            {/* PLATAFORMA (MULTI-SELECT) */}
             <div>
-               <label className="text-gray-400 text-xs font-bold uppercase mb-3 block tracking-wider">Plataforma</label>
+               <label className="text-gray-400 text-xs font-bold uppercase mb-3 block tracking-wider">
+                 Plataforma(s) {selectedPlatforms.length > 0 && <span className="text-emerald-500 ml-1">({selectedPlatforms.length})</span>}
+               </label>
                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {displayedPlatforms.map((p) => {
-                     const isSelected = selectedPlatform === p.id;
+                     const isSelected = selectedPlatforms.includes(p.id);
                      return (
                        <button
                          key={p.id}
                          type="button"
-                         onClick={() => setSelectedPlatform(p.id as Platform)}
+                         onClick={() => togglePlatform(p.id as Platform)}
                          className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
                        >
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
@@ -734,19 +934,68 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* DADOS FINANCEIROS */}
+            {/* ÁREA DE INPUT DE VALORES (CONDICIONAL: SINGLE vs MULTIPLE) */}
+            
+            {/* SE MÚLTIPLOS APPS: MOSTRAR INPUTS INDIVIDUAIS */}
+            {selectedPlatforms.length > 1 && (
+               <div className="space-y-3 bg-gray-900/30 p-4 rounded-xl border border-gray-800">
+                  <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                     <Layers size={14} /> Detalhamento por App
+                  </h4>
+                  {selectedPlatforms.map(pId => {
+                     const pInfo = ALL_PLATFORMS.find(p => p.id === pId) || ALL_PLATFORMS[5];
+                     return (
+                        <div key={pId} className="flex flex-col sm:flex-row gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
+                           <div className="flex items-center gap-3 w-full sm:w-auto">
+                              <div className="w-8 h-8 rounded-lg bg-white p-0.5 flex items-center justify-center">
+                                 {pInfo.logo ? <img src={pInfo.logo} className="w-full h-full object-contain"/> : pInfo.icon}
+                              </div>
+                              <span className="text-white font-bold text-sm w-20">{pInfo.label}</span>
+                           </div>
+                           
+                           <div className="flex gap-2 w-full">
+                              <div className="relative flex-1">
+                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
+                                 <input 
+                                    type="number" step="0.01" placeholder="0.00"
+                                    value={splitData[pId]?.amount || ""}
+                                    onChange={(e) => updateSplitData(pId, 'amount', e.target.value)}
+                                    className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-8 pr-2 text-white text-sm focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                 />
+                              </div>
+                              <div className="relative w-24">
+                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-[10px] uppercase">Trips</span>
+                                 <input 
+                                    type="number" placeholder="0"
+                                    value={splitData[pId]?.trips || ""}
+                                    onChange={(e) => updateSplitData(pId, 'trips', e.target.value)}
+                                    className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-3 pr-10 text-white text-sm focus:border-purple-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                 />
+                              </div>
+                           </div>
+                        </div>
+                     )
+                  })}
+               </div>
+            )}
+
+            {/* DADOS FINANCEIROS GERAIS (TOTAL OU ÚNICO) */}
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 md:p-6 shadow-xl relative overflow-hidden">
                <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                   <div className="col-span-1 md:col-span-2">
-                      <label className="text-emerald-400 text-xs font-bold uppercase mb-2 block tracking-wider">Valor Total (R$)</label>
+                      <label className="text-emerald-400 text-xs font-bold uppercase mb-2 block tracking-wider">
+                         {selectedPlatforms.length > 1 ? "Valor Total (Calculado)" : "Valor Total (R$)"}
+                      </label>
                       <div className="relative">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-xl md:text-2xl">R$</span>
                         <input 
                           type="number" step="0.01" required inputMode="decimal" min="0"
+                          // Se tiver multiplos, é readOnly
+                          readOnly={selectedPlatforms.length > 1}
                           value={amount} onChange={e => setAmount(e.target.value)} 
                           onKeyDown={preventNegativeInput}
-                          className="w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                          className={`w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 cursor-not-allowed text-emerald-200' : ''}`}
                           placeholder="0,00" 
                         />
                       </div>
@@ -855,16 +1104,19 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 5. VIAGENS */}
+               {/* 5. VIAGENS (AUTO CALCULADO SE MULTIPLE) */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Viagens</label>
+                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">
+                     {selectedPlatforms.length > 1 ? "Viagens (Total)" : "Viagens"}
+                   </label>
                    <div className="flex items-center gap-1.5">
                       <Briefcase size={14} className="text-purple-500 shrink-0" />
                       <input 
                         type="number" inputMode="numeric" min="0"
+                        readOnly={selectedPlatforms.length > 1}
                         value={trips} onChange={e => setTrips(e.target.value)} 
                         onKeyDown={preventNegativeInput}
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        className={`w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 text-purple-200 cursor-not-allowed' : ''}`}
                         placeholder="0" 
                       />
                    </div>
@@ -954,6 +1206,8 @@ export default function GanhosPage() {
               {!loading && recentGains.map(gain => {
                  const platformInfo = getPlatformDetails(gain.platform);
                  const isDeleting = deletingId === gain.id;
+                 const isMultiple = gain.platform === 'MULTIPLE';
+                 
                  return (
                    <div 
                      key={gain.id} 
@@ -961,14 +1215,36 @@ export default function GanhosPage() {
                      className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
                    >
                       <div className="flex items-center gap-3">
-                         <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-white flex items-center justify-center shadow-sm overflow-hidden relative">
-                           {platformInfo.logo ? <img src={platformInfo.logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-blue-600 flex items-center justify-center">{platformInfo.icon}</div>}
+                         <div className={`w-10 h-10 min-w-[2.5rem] rounded-xl flex items-center justify-center shadow-sm overflow-hidden relative ${isMultiple ? 'bg-indigo-600' : 'bg-white'}`}>
+                           {/* Se for MULTIPLE, exibe o ícone de camadas, senão a logo normal */}
+                           {isMultiple ? (
+                             <Layers size={20} className="text-white"/>
+                           ) : (
+                             (platformInfo as any).logo ? <img src={(platformInfo as any).logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : platformInfo.icon
+                           )}
                          </div>
                          <div>
-                            <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
-                              {platformInfo.label}
-                              <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
+                                {platformInfo.label}
+                                <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
+                              </p>
+                              {/* TAG VISUAL DE APPS ENVOLVIDOS (Mini Logos) */}
+                              {isMultiple && gain.split && (
+                                <div className="flex -space-x-1.5">
+                                   {gain.split.map((s, idx) => {
+                                      const miniLogo = ALL_PLATFORMS.find(mp => mp.id === s.platform)?.logo;
+                                      if (!miniLogo) return null;
+                                      return (
+                                        <div key={idx} className="w-4 h-4 rounded-full bg-white border border-gray-800 overflow-hidden z-10">
+                                           <img src={miniLogo} className="w-full h-full object-cover"/>
+                                        </div>
+                                      )
+                                   })}
+                                </div>
+                              )}
+                            </div>
+                            
                             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
                                <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
                                {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (

@@ -58,6 +58,16 @@ export interface BaseTransaction {
 export interface IncomeTransaction extends BaseTransaction {
   type: 'INCOME';
   platform: Platform; // Uber, 99, Rappi, etc.
+  
+  // === NOVO CAMPO (MULTIPLE APPS) ===
+  // Permite detalhar a composição do ganho quando platform === 'MULTIPLE'
+  split?: { 
+    platform: Platform; 
+    amount: number; // Valor em centavos
+    trips?: number; // <--- ADICIONADO: Quantidade de corridas por app individual
+  }[];
+  // ==================================
+
   distanceDriven: number;
   onlineDurationMinutes: number;
   tripsCount: number;

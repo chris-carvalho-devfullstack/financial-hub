@@ -3,10 +3,10 @@
 export enum Platform {
   // Motorista de App
   UBER = 'UBER',
-  NINETY_NINE = '99', // Mantendo o valor '99' que é padrão de mercado
+  NINETY_NINE = '99', // Mantendo o valor '99'
   INDRIVER = 'INDRIVER',
 
-  // Entregas (Mantendo suas adições)
+  // Entregas
   IFOOD = 'IFOOD',
   RAPPI = 'RAPPI',
   LOGGI = 'LOGGI',
@@ -15,7 +15,10 @@ export enum Platform {
   CORNER_SHOP = 'CORNERSHOP',
 
   PARTICULAR = 'PARTICULAR',
-  OTHER = 'OTHER' // Útil para casos não listados
+  OTHER = 'OTHER',
+  
+  // === IMPORTANTE: Necessário para o recurso de múltiplos apps ===
+  MULTIPLE = 'MULTIPLE' 
 }
 
 export enum ExpenseCategory {
@@ -26,7 +29,6 @@ export enum ExpenseCategory {
   CLEANING = 'CLEANING',
   FOOD = 'FOOD',
   
-  // Suas adições mantidas
   PHONE = 'PHONE', 
   FINANCING = 'FINANCING',
   
@@ -38,21 +40,20 @@ export enum ExpenseCategory {
 export enum VehicleType {
   CAR = 'CAR',
   MOTORCYCLE = 'MOTORCYCLE',
-  SUV = 'SUV',       // Novo
-  PICKUP = 'PICKUP', // Novo
-  TRUCK = 'TRUCK',   // Novo
-  VAN = 'VAN'        // Novo
+  SUV = 'SUV',       
+  PICKUP = 'PICKUP', 
+  TRUCK = 'TRUCK',   
+  VAN = 'VAN'        
 }
 
 export enum FuelType {
-  // Removemos 'FLEX' pois agora o carro terá um tanque que aceita [GASOLINE, ETHANOL]
   GASOLINE = 'GASOLINE',
   ETHANOL = 'ETHANOL',
   DIESEL = 'DIESEL',
   CNG = 'CNG',        // Gás Natural Veicular
-  LPG = 'LPG',        // Gás Liquefeito (Empilhadeiras/Outros)
+  LPG = 'LPG',        // Gás Liquefeito
   ELECTRIC = 'ELECTRIC',
-  HYBRID = 'HYBRID'   // Classificação geral
+  HYBRID = 'HYBRID'   
 }
 
 export enum TankType {
