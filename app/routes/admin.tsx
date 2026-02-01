@@ -1,34 +1,51 @@
-import { Outlet, Link, useLocation } from "react-router";
-import { LayoutDashboard, Users, TrendingUp, Settings, LogOut } from "lucide-react";
+// app/routes/admin.tsx
+import { Outlet, redirect } from "react-router";
+import type { Route } from "./+types/admin";
+import { Sidebar } from "~/components/sidebar";
+import { MobileNav } from "~/components/mobile-nav";
+import { getAuth } from "firebase/auth";
+import { app } from "~/lib/firebase.client";
+
+// Loader de proteção de rota
+export async function clientLoader({ request }: Route.ClientLoaderArgs) {
+  const auth = getAuth(app);
+  await auth.authStateReady();
+  if (!auth.currentUser) {
+    return redirect("/login");
+  }
+  return null;
+}
 
 export default function AdminLayout() {
-  const location = useLocation();
-  const menu = [
-    { name: "Visão Geral", path: "/admin", icon: LayoutDashboard },
-    { name: "Usuários & Assinantes", path: "/admin/users", icon: Users },
-    { name: "Financeiro da Plataforma", path: "/admin/financials", icon: TrendingUp },
-  ];
-
   return (
-    <div className="flex h-screen bg-slate-50">
-      <aside className="w-64 bg-slate-900 text-white flex flex-col">
-        <div className="p-6 border-b border-slate-800">
-          <span className="text-xl font-bold text-emerald-400">Admin Hub</span>
-        </div>
-        <nav className="flex-1 p-4 space-y-1">
-          {menu.map((item) => (
-            <Link key={item.path} to={item.path} 
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                location.pathname === item.path ? "bg-emerald-600 text-white" : "text-slate-400 hover:bg-slate-800"
-              }`}>
-              <item.icon size={18} />
-              <span className="font-medium">{item.name}</span>
-            </Link>
-          ))}
-        </nav>
+    <div className="flex min-h-screen bg-gray-50 dark:bg-zinc-950">
+      
+      {/* --- SIDEBAR DESKTOP --- 
+          - Escondida no mobile (hidden)
+          - Flexível no desktop (md:flex)
+          - Fixa na lateral esquerda
+          - MODO ADMIN ATIVADO (type="admin")
+      */}
+      <aside className="hidden md:flex flex-col w-64 fixed inset-y-0 z-50 border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+        <Sidebar type="admin" />
       </aside>
-      <main className="flex-1 overflow-y-auto p-8">
-        <Outlet />
+
+      {/* --- ÁREA PRINCIPAL --- */}
+      <main className="flex-1 flex flex-col min-h-screen md:pl-64 transition-all duration-300">
+        
+        {/* --- MOBILE NAVIGATION ---
+            - MODO ADMIN ATIVADO (type="admin")
+            - Isso ativa as cores roxas e os menus de gestão
+        */}
+        <MobileNav type="admin" />
+
+        {/* --- CONTEÚDO DA PÁGINA --- 
+            mb-20: Adiciona margem no fundo APENAS no mobile, para o conteúdo não ficar atrás da barra de navegação inferior.
+            md:mb-0: No desktop, remove essa margem.
+        */}
+        <div className="flex-1 p-4 md:p-8 overflow-x-hidden mb-20 md:mb-0">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

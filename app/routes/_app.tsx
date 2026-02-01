@@ -1,56 +1,61 @@
-import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router";
+import { useEffect, useState } from "react";
 import { Sidebar } from "~/components/sidebar";
 import { MobileNav } from "~/components/mobile-nav";
-import { auth } from "~/lib/firebase.client";
-import { LogOut } from "lucide-react";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { app } from "~/lib/firebase.client";
+import { Loader2 } from "lucide-react";
 
 export default function AppLayout() {
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const [isChecking, setIsChecking] = useState(true);
+  const auth = getAuth(app);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         navigate("/login");
-      } else {
-        setIsChecking(false);
       }
+      setLoading(false);
     });
-    return () => unsubscribe();
-  }, [navigate]);
 
-  if (isChecking) {
+    return () => unsubscribe();
+  }, [auth, navigate]);
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* === DESKTOP: Sidebar Lateral === */}
-      <div className="hidden md:block">
-        <Sidebar />
-      </div>
+    // Fundo escuro para combinar com o tema do App do Usuário
+    <div className="flex min-h-screen bg-gray-900 text-gray-100">
+      
+      {/* --- SIDEBAR DESKTOP --- 
+          Adicionamos este wrapper <aside> para fixar a Sidebar na esquerda,
+          assim como fizemos no layout de Admin.
+      */}
+      <aside className="hidden md:flex flex-col w-64 fixed inset-y-0 z-50 border-r border-gray-800 bg-gray-900">
+        <Sidebar type="user" />
+      </aside>
 
-      {/* === MOBILE: Header Simples === */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-gray-900/90 backdrop-blur border-b border-gray-800 flex items-center justify-between px-4 z-40">
-        <h1 className="text-lg font-bold text-emerald-500">Financial Hub</h1>
-        <button onClick={() => auth.signOut()} className="text-gray-400">
-          <LogOut size={20} />
-        </button>
-      </div>
+      {/* --- ÁREA PRINCIPAL --- */}
+      <main className="flex-1 flex flex-col min-h-screen md:pl-64 transition-all duration-300">
+        
+        {/* Mobile Navigation (Barra Inferior) */}
+        <MobileNav type="user" />
 
-      {/* === ÁREA DE CONTEÚDO === */}
-      {/* No Desktop: padding-left-64. No Mobile: padding-bottom-20 e padding-top-20 */}
-      <main className="md:pl-64 pt-20 pb-24 md:py-8 px-4 md:px-8 max-w-7xl mx-auto min-h-screen">
-        <Outlet />
+        {/* --- CONTEÚDO --- 
+            mb-20: Espaço para a barra inferior no mobile
+            md:mb-0: Remove espaço no desktop
+        */}
+        <div className="flex-1 p-4 md:p-8 overflow-x-hidden mb-20 md:mb-0">
+          <Outlet />
+        </div>
       </main>
-
-      {/* === MOBILE: Menu Inferior === */}
-      <MobileNav />
     </div>
   );
 }

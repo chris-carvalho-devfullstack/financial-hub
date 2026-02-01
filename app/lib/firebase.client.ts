@@ -4,7 +4,7 @@ import {
   getAuth, 
   setPersistence, 
   browserLocalPersistence,
-  GoogleAuthProvider // <--- 1. Importação necessária
+  GoogleAuthProvider 
 } from "firebase/auth"; 
 import { getFirestore } from "firebase/firestore";
 
@@ -18,13 +18,13 @@ const firebaseConfig = {
 };
 
 // Singleton: Garante que só inicializa uma vez
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+// CORREÇÃO: Adicionado 'export' para que outros arquivos (como admin.tsx) possam usar 'app'
+export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 // === ADIÇÃO: Provider do Google ===
-// Isso cria a configuração necessária para o login funcionar e remove o erro no VS Code
 export const googleProvider = new GoogleAuthProvider(); 
 
 // === ADIÇÃO: Forçar persistência local ===

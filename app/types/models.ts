@@ -27,8 +27,9 @@ export interface Vehicle {
   year: number;
   tanks: VehicleTank[]; // <--- Array de tanques: Suporte a GNV + Líquido
 
-  // Dados Burocráticos (Novos Campos Opcionais)
-  licensePlate: string;
+  // Dados Burocráticos
+  licensePlate?: string; // Padrão novo
+  plate?: string;        // <--- ADICIONADO: Compatibilidade com Admin Panel (corrige o erro ts(2339))
   vin?: string;       // Chassi
   renavam?: string;   // Renavam
   notes?: string;     // Observações gerais
@@ -36,6 +37,7 @@ export interface Vehicle {
   // Controle
   currentOdometer: number;
   lastOdometerDate?: string; // <--- Importante para evitar retrocesso de odômetro em edições antigas
+  isDefault?: boolean; // Mantido para compatibilidade com seletores rápidos
   
   createdAt?: string;
   updatedAt?: string;
@@ -50,6 +52,7 @@ export interface BaseTransaction {
   odometer?: number; // Snapshot do odômetro no momento
   description?: string; // Observação geral
   createdAt: string;
+  updatedAt?: string; // Adicionado para consistência
 }
 
 export interface IncomeTransaction extends BaseTransaction {
@@ -71,7 +74,8 @@ export interface ExpenseTransaction extends BaseTransaction {
   
   // Campos específicos de abastecimento
   fuelType?: FuelType; // <--- Qual combustível foi usado NESTE abastecimento
-  liters?: number;     // Quantidade (Litros, m³ ou kWh)
+  litros?: number;     // Quantidade (Litros, m³ ou kWh) - Padronizado para português
+  liters?: number;     // Alias para compatibilidade se o backend enviar em inglês
   pricePerLiter?: number; // Preço unitário
   fullTank?: boolean;  // Se encheu o tanque (reset de média)
   stationName?: string;
@@ -94,13 +98,15 @@ export interface Goal {
   // Detalhes Visuais
   icon?: string; 
   color?: string; 
+  category?: string; // Mantido para compatibilidade
   
   // Novos Campos de Gestão (Roadmap)
   purpose?: string;     // Ex: Aposentadoria, Troca de Carro
   description?: string;
-  status?: 'ACTIVE' | 'COMPLETED';
+  status?: 'ACTIVE' | 'COMPLETED' | 'PAUSED' | 'IN_PROGRESS';
   
   createdAt: string;
+  updatedAt?: string;
 }
 
 // === ATUALIZAÇÃO PARA SAAS / ADMIN ===
@@ -110,17 +116,22 @@ export interface UserProfile {
   
   // Identificação Visual (Útil para o Admin)
   name?: string; 
+  phone?: string;
   photoUrl?: string;
+
+  // === PERMISSÕES (Adicionado para o Admin Panel) ===
+  role?: 'ADMIN' | 'USER'; 
 
   // === DADOS DE ASSINATURA (SaaS) ===
   plan: 'FREE' | 'PRO'; 
-  subscriptionStatus: 'ACTIVE' | 'CANCELED' | 'PAST_DUE' | 'EXPIRED'; // Status financeiro real
+  // Adicionado 'BLOCKED' para suportar o botão de bloqueio
+  subscriptionStatus: 'ACTIVE' | 'CANCELED' | 'PAST_DUE' | 'EXPIRED' | 'BLOCKED'; 
   subscriptionEndsAt?: string; // Data de expiração (ISO)
+  stripeCustomerId?: string; // Útil para integrações futuras
 
   // === MÉTRICAS DE RETENÇÃO (Churn) ===
-  // Se o usuário era PRO e cancelou, salvamos essa data.
-  // O cálculo de Churn mensal será: Usuários com canceledAt no mês / Total de usuários PRO ativos no início do mês.
   canceledAt?: string; 
+  lastLogin?: string; // Adicionado para exibir no Modal de Detalhes
   
   // Preferências do App
   lastSelectedVehicleId?: string; 
