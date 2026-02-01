@@ -13,7 +13,7 @@ import {
   HelpCircle,
   Smartphone
 } from "lucide-react";
-import { auth } from "~/lib/firebase.client";
+import { auth } from "~/lib/app/firebase.client";
 
 export default function Perfil() {
   const navigate = useNavigate();

@@ -10,7 +10,7 @@ import {
   AlertTriangle, Pencil, X, Save, Gauge, FileText, ExternalLink, DollarSign, 
   Flame, Zap, Info
 } from "lucide-react";
-import { db, auth } from "~/lib/firebase.client";
+import { db, auth } from "~/lib/app/firebase.client";
 import { ExpenseCategory, FuelType, TankType } from "~/types/enums";
 import type { Vehicle } from "~/types/models";
 

@@ -1,7 +1,7 @@
 // app/routes/perfil.senha.tsx
 import { useState } from "react";
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
-import { auth } from "~/lib/firebase.client";
+import { auth } from "~/lib/app/firebase.client";
 import { SubHeader } from "~/components/sub-header";
 import { Lock, KeyRound, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 

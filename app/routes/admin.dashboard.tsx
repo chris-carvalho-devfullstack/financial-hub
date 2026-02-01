@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { Users, UserMinus, DollarSign, TrendingUp, AlertCircle, Database } from "lucide-react"; // Adicionei Database para variar o ícone
 import { collection, getDocs, query } from "firebase/firestore";
-import { db } from "~/lib/firebase.client";
+import { db } from "~/lib/app/firebase.client";
 import type { UserProfile } from "~/types/models";
 
 export default function AdminDashboard() {

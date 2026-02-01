@@ -24,7 +24,7 @@ import {
   doc,
   updateDoc
 } from "firebase/firestore";
-import { db } from "~/lib/firebase.client";
+import { db } from "~/lib/app/firebase.client";
 import type { UserProfile, Vehicle, Transaction } from "~/types/models";
 
 // --- Sub-componente: Badge de Status ---

@@ -1,20 +1,16 @@
 // app/routes/dashboard.tsx
 
 import { useEffect, useState } from "react";
-import { 
-  collection, query, where, onSnapshot, orderBy, limit, getDocs, 
-  doc, setDoc // <--- ADICIONADO: Para persistência
-} from "firebase/firestore";
+import { useNavigate } from "react-router";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
   Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign, Car,
-  ChevronDown // <--- ADICIONADO: Ícone do menu
+  ChevronDown 
 } from "lucide-react";
-import { db, auth } from "~/lib/firebase.client";
-// CORREÇÃO 1: Removido FuelTransaction da importação, pois não existe no models.ts
+import { supabase } from "~/lib/supabase.client"; // ✅ Supabase Client
 import type { Transaction, IncomeTransaction, ExpenseTransaction, Vehicle } from "~/types/models";
 import { ExpenseCategory } from "~/types/enums";
 import { OdometerChart } from "~/components/OdometerChart"; 
@@ -22,10 +18,9 @@ import { OdometerChart } from "~/components/OdometerChart";
 // Tipos
 type TimeFilter = 'DAY' | 'WEEK' | 'MONTH';
 
-// === HELPER: LOGO DO VEÍCULO (NOVO) ===
+// === HELPER: LOGO DO VEÍCULO ===
 const getBrandLogo = (brand: string) => {
   if (!brand) return "/logos/brands/generic.png";
-  // Normaliza o nome para bater com os arquivos (ex: "Fiat" -> "fiat")
   const safeBrand = brand.toLowerCase().trim().replace(/\s+/g, '-');
   return `/logos/brands/${safeBrand}.png`;
 };
@@ -106,7 +101,7 @@ function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = fals
 export default function Dashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
-  const [isVehicleMenuOpen, setIsVehicleMenuOpen] = useState(false); // <--- NOVO ESTADO
+  const [isVehicleMenuOpen, setIsVehicleMenuOpen] = useState(false);
   
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -115,22 +110,16 @@ export default function Dashboard() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('MONTH');
   const [currentDate, setCurrentDate] = useState(new Date());
 
+  const navigate = useNavigate();
+
   // Métricas
   const [metrics, setMetrics] = useState({
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
     trips: 0, 
-    
-    // Indicadores Operacionais
-    avgTicket: 0,    // Valor médio por corrida
-    tripsPerHour: 0, // Corridas por hora
-    
-    // Custos/Eficiência
+    avgTicket: 0, tripsPerHour: 0,
     profitPerHour: 0, profitPerKm: 0, 
-    fuelCostPerKmPanel: 0,   // Baseado no Painel (Estimado)
-    fuelCostPerKmPump: 0,    // Baseado na Bomba (Histórico)
-    maintenanceCostPerKm: 0, // Outros custos
-    
+    fuelCostPerKmPanel: 0, fuelCostPerKmPump: 0, maintenanceCostPerKm: 0,
     grossPerHour: 0, grossPerKm: 0, avgDailyIncome: 0,
     clusterAvg: 0, realAvg: 0,
     bestApp: { name: '-', amount: 0 }
@@ -147,118 +136,154 @@ export default function Dashboard() {
     setCurrentDate(newDate);
   };
 
-  // 1. Carregar Veículos (ATUALIZADO PARA PERSISTÊNCIA)
+  // 1. Carregar Veículos e Preferência do Usuário (Supabase)
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const userId = auth.currentUser.uid;
+    const fetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return; 
 
-    // A. Listener dos Veículos
-    const q = query(collection(db, "vehicles"), where("userId", "==", userId));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Vehicle[];
-      setVehicles(data);
-      
-      // Fallback: se não tiver nada selecionado, seleciona o primeiro
-      if (data.length > 0 && !selectedVehicleId) {
-        setSelectedVehicleId(data[0].id);
+      // Busca Veículos
+      const { data: vehiclesData, error: vehiclesError } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('user_id', session.user.id);
+
+      if (vehiclesError) {
+        console.error("Erro ao buscar veículos:", vehiclesError);
+        return;
       }
-    });
 
-    // B. Listener da Preferência do Usuário (Firestore para persistência multi-device)
-    const userRef = doc(db, "users", userId);
-    const unsubUser = onSnapshot(userRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const userData = docSnap.data();
-        const savedId = userData.lastSelectedVehicleId;
-        if (savedId) {
-           setSelectedVehicleId(savedId);
-        }
+      // Mapeia snake_case (banco) para camelCase (frontend)
+      const mappedVehicles: Vehicle[] = (vehiclesData || []).map((v: any) => ({
+        id: v.id,
+        userId: v.user_id,
+        name: v.name,
+        brand: v.brand,
+        model: v.model,
+        type: v.type,
+        year: v.year,
+        tanks: v.tanks,
+        currentOdometer: v.current_odometer,
+        isDefault: v.is_default,
+        createdAt: v.created_at
+      }));
+
+      setVehicles(mappedVehicles);
+
+      // Busca Preferência no Perfil
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('last_selected_vehicle_id')
+        .eq('id', session.user.id)
+        .single();
+
+      // Lógica de Seleção: Perfil > Primeiro da Lista > Nada
+      if (profileData?.last_selected_vehicle_id && mappedVehicles.find(v => v.id === profileData.last_selected_vehicle_id)) {
+        setSelectedVehicleId(profileData.last_selected_vehicle_id);
+      } else if (mappedVehicles.length > 0) {
+        setSelectedVehicleId(mappedVehicles[0].id);
       }
-    });
-
-    return () => {
-      unsub();
-      unsubUser();
     };
-  }, []); // Dependências vazias
 
-  // Função para trocar veículo e SALVAR NO FIRESTORE (NOVA)
+    fetchData();
+  }, []);
+
+  // Função para trocar veículo e PERSISTIR NO SERVIDOR
   const handleChangeVehicle = async (id: string) => {
-    setSelectedVehicleId(id); // Atualiza UI instantaneamente
-    setIsVehicleMenuOpen(false); // Fecha menu
-
-    if (auth.currentUser) {
-      try {
-        const userRef = doc(db, "users", auth.currentUser.uid);
-        // Salva preferência (merge: true cria o doc se não existir)
-        await setDoc(userRef, { lastSelectedVehicleId: id }, { merge: true });
-      } catch (error) {
-        console.error("Erro ao salvar preferência:", error);
-      }
+    setSelectedVehicleId(id);
+    setIsVehicleMenuOpen(false);
+    
+    // Atualiza no banco de dados para persistir entre dispositivos
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await supabase
+        .from('profiles')
+        .update({ last_selected_vehicle_id: id })
+        .eq('id', session.user.id);
     }
   };
 
-  // 2. Buscar último preço de combustível DO VEÍCULO SELECIONADO
+  // 2. Buscar último preço de combustível (Supabase)
   useEffect(() => {
-    if (!auth.currentUser || !selectedVehicleId) return;
+    if (!selectedVehicleId) return;
     
     const fetchLastFuel = async () => {
-      const q = query(
-        collection(db, "transactions"),
-        where("userId", "==", auth.currentUser?.uid),
-        where("vehicleId", "==", selectedVehicleId),
-        where("type", "==", "EXPENSE"),
-        orderBy("date", "desc"),
-        limit(10) 
-      );
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('price_per_liter')
+        .eq('vehicle_id', selectedVehicleId)
+        .eq('type', 'EXPENSE')
+        .gt('price_per_liter', 0) 
+        .order('date', { ascending: false })
+        .limit(1);
       
-      try {
-        const snap = await getDocs(q);
-        // CORREÇÃO 2: Tipagem correta para ExpenseTransaction
-        const fuelTrans = snap.docs
-          .map(d => d.data() as ExpenseTransaction)
-          .find(t => t.pricePerLiter && t.pricePerLiter > 0);
-        
-        if (fuelTrans && fuelTrans.pricePerLiter) {
-          setLastFuelPrice(fuelTrans.pricePerLiter);
-        } else {
-          setLastFuelPrice(0);
-        }
-      } catch (error) {
-        console.error("Erro ao buscar preço combustível:", error);
+      if (!error && data && data.length > 0) {
+        setLastFuelPrice(Number(data[0].price_per_liter));
+      } else {
+        setLastFuelPrice(0);
       }
     };
     
     fetchLastFuel();
   }, [selectedVehicleId]);
 
-  // 3. Buscar Transações e Calcular Métricas
+  // 3. Buscar Transações e Calcular Métricas (Supabase)
   useEffect(() => {
-    if (!auth.currentUser || !selectedVehicleId) return;
+    if (!selectedVehicleId) return;
     
     setLoading(true);
     const { start, end } = getStartEndDates(currentDate, timeFilter);
     
-    const q = query(
-      collection(db, "transactions"),
-      where("userId", "==", auth.currentUser.uid),
-      where("vehicleId", "==", selectedVehicleId),
-      where("date", ">=", start.toISOString()),
-      where("date", "<=", end.toISOString()),
-      orderBy("date", "asc")
-    );
+    const fetchTransactions = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Transaction[];
-      setTransactions(data);
-      calculateMetrics(data, start, end);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('vehicle_id', selectedVehicleId)
+        .gte('date', start.toISOString())
+        .lte('date', end.toISOString())
+        .order('date', { ascending: true });
+
+      if (error) {
+        console.error("Erro ao buscar transações:", error);
+        setLoading(false);
+        return;
+      }
+
+      const mappedTransactions: Transaction[] = (data || []).map((t: any) => ({
+        id: t.id,
+        userId: t.user_id,
+        vehicleId: t.vehicle_id,
+        type: t.type,
+        amount: Number(t.amount),
+        date: t.date,
+        description: t.description,
+        platform: t.platform,
+        distanceDriven: t.distance_driven,
+        onlineDurationMinutes: t.online_duration_minutes,
+        tripsCount: t.trips_count,
+        split: t.split,
+        clusterKmPerLiter: t.cluster_km_per_liter,
+        category: t.category,
+        fuelType: t.fuel_type,
+        liters: t.liters ? Number(t.liters) : undefined,
+        pricePerLiter: t.price_per_liter ? Number(t.price_per_liter) : undefined,
+        isFullTank: t.is_full_tank,
+        createdAt: t.created_at
+      })) as Transaction[];
+
+      setTransactions(mappedTransactions);
+      calculateMetrics(mappedTransactions);
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchTransactions();
   }, [currentDate, timeFilter, lastFuelPrice, selectedVehicleId]);
 
-  const calculateMetrics = (data: Transaction[], start: Date, end: Date) => {
+  const calculateMetrics = (data: Transaction[]) => {
     let income = 0;
     let expense = 0;
     let km = 0;
@@ -267,15 +292,15 @@ export default function Dashboard() {
     let sumClusterAvg = 0;
     let countClusterEntries = 0;
     let trips = 0; 
-    
     let maintenanceExpenses = 0; 
     
     const platformIncome: Record<string, number> = {};
     const dailyMap = new Map();
 
     data.forEach(t => {
-      const val = t.amount / 100;
-      const dateKey = new Date(t.date).getDate();
+      const val = t.amount; // Supabase retorna número correto
+      const tDate = new Date(t.date);
+      const dateKey = tDate.getUTCDate(); 
 
       if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, { day: dateKey, income: 0, expense: 0 });
       const dayData = dailyMap.get(dateKey);
@@ -286,21 +311,14 @@ export default function Dashboard() {
         
         const inc = t as IncomeTransaction;
 
-        // === INICIO DA ALTERAÇÃO ===
-        // Se for MULTIPLE, usamos o split para somar no app correto (Uber, 99, etc)
-        // Isso corrige a estatística de "Melhor App" sem duplicar o KM
         if (inc.platform === 'MULTIPLE' && inc.split && inc.split.length > 0) {
            inc.split.forEach(item => {
-              // Converte centavos para reais
-              const itemVal = item.amount / 100;
-              // Soma no acumulador daquele app específico
+              const itemVal = item.amount; 
               platformIncome[item.platform] = (platformIncome[item.platform] || 0) + itemVal;
            });
-        } else {
-           // Comportamento padrão (apenas 1 app)
+        } else if (inc.platform) {
            platformIncome[inc.platform] = (platformIncome[inc.platform] || 0) + val;
         }
-        // === FIM DA ALTERAÇÃO ===
 
         if (inc.distanceDriven) km += Number(inc.distanceDriven);
         if (inc.onlineDurationMinutes) minutes += Number(inc.onlineDurationMinutes);
@@ -315,14 +333,11 @@ export default function Dashboard() {
         dayData.expense += val;
         
         const exp = t as ExpenseTransaction;
-        
-        // CORREÇÃO 3: Comparação segura de Enum com conversão 'as string' para legado
         const categoryStr = exp.category as string; 
         const isFuel = exp.category === ExpenseCategory.FUEL || categoryStr === 'Combustível' || categoryStr === 'FUEL';
         
         if (isFuel) {
-           // Como ExpenseTransaction tem os campos de fuel opcionais, usamos direto
-           if (exp.liters) totalLitersRefueled += exp.liters;
+           if (exp.liters) totalLitersRefueled += Number(exp.liters);
         } else {
            maintenanceExpenses += val;
         }
@@ -332,15 +347,12 @@ export default function Dashboard() {
     const profit = income - expense; 
     const hours = minutes / 60;
     
-    // === MÉDIAS OPERACIONAIS ===
     const avgTicket = trips > 0 ? (income / trips) : 0;
     const tripsPerHour = hours > 0 ? (trips / hours) : 0;
 
-    // === MÉDIAS DE CONSUMO ===
     const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0;
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
-    // === CUSTOS POR KM ===
     let fuelCostPerKmPanel = 0;
     if (clusterAvg > 0 && lastFuelPrice > 0) {
       fuelCostPerKmPanel = lastFuelPrice / clusterAvg;
@@ -352,7 +364,6 @@ export default function Dashboard() {
     }
 
     const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
-
     const usedFuelCostPerKm = fuelCostPerKmPump > 0 ? fuelCostPerKmPump : fuelCostPerKmPanel;
     const totalOperationalCost = (usedFuelCostPerKm * km) + maintenanceExpenses;
     
@@ -388,23 +399,19 @@ export default function Dashboard() {
     return currentDate.toLocaleDateString('pt-BR', opts);
   };
 
-  // Encontra o objeto do veículo selecionado para exibir no botão
   const currentVehicle = vehicles.find(v => v.id === selectedVehicleId);
 
   return (
     <div className="space-y-8 pb-24 animate-fade-in px-4 md:px-0">
       
-      {/* === HEADER REESTRUTURADO === */}
+      {/* === HEADER === */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mt-4">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-2">Visão Geral</h1>
           <p className="text-gray-400 mt-1 text-sm">Acompanhe suas metas e eficiência.</p>
         </div>
 
-        {/* ÁREA DE FILTROS E SELETOR NA MESMA LINHA */}
         <div className="flex flex-wrap items-center gap-3">
-           
-           {/* === SELETOR DE VEÍCULO MODERNO (ATUALIZADO) === */}
            <div className="relative z-50">
               <button 
                 onClick={() => setIsVehicleMenuOpen(!isVehicleMenuOpen)}
@@ -412,7 +419,6 @@ export default function Dashboard() {
               >
                 {currentVehicle ? (
                   <>
-                    {/* LOGO DO VEÍCULO SELECIONADO (AUMENTADO w-10 h-10) */}
                     <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center p-1 overflow-hidden shrink-0">
                        <img 
                          src={getBrandLogo(currentVehicle.brand)} 
@@ -432,7 +438,6 @@ export default function Dashboard() {
                 )}
               </button>
 
-              {/* DROPDOWN MENU */}
               {isVehicleMenuOpen && (
                 <div className="absolute top-full left-0 mt-2 w-full min-w-[260px] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 z-[60]">
                   <div className="py-2">
@@ -442,14 +447,8 @@ export default function Dashboard() {
                         onClick={() => handleChangeVehicle(v.id)}
                         className={`w-full flex items-center gap-4 px-4 py-3 hover:bg-gray-800 transition-colors ${selectedVehicleId === v.id ? 'bg-gray-800 border-l-4 border-emerald-500' : ''}`}
                       >
-                          {/* LOGO NA LISTA (AUMENTADO w-12 h-12 E SEM FILTRO DE COR) */}
                           <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center p-1 shrink-0 shadow-sm">
-                             <img 
-                                 src={getBrandLogo(v.brand)} 
-                                 alt={v.brand}
-                                 className="w-full h-full object-contain" 
-                                 // Removido filtro grayscale para cores reais
-                             />
+                             <img src={getBrandLogo(v.brand)} alt={v.brand} className="w-full h-full object-contain" />
                           </div>
                           <div className="text-left">
                              <p className="text-white font-bold text-base">{v.name}</p>
@@ -462,10 +461,8 @@ export default function Dashboard() {
               )}
            </div>
 
-           {/* DIVISOR VISUAL */}
            <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
-           {/* FILTROS DE TEMPO (MANTIDOS ORIGINAIS) */}
            <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800">
               {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
                 <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
@@ -613,7 +610,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* === NOVO: GRÁFICO DE ODÔMETRO (Evolução do KM) === */}
       <div className="pt-4">
          <OdometerChart transactions={transactions} />
       </div>

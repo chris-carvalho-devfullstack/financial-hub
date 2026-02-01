@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { updateProfile } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore"; // <--- Importar Firestore
-import { auth, db } from "~/lib/firebase.client"; // <--- Importar db
+import { auth, db } from "~/lib/app/firebase.client"; // <--- Importar db
 import { SubHeader } from "~/components/sub-header";
 import { User, Mail, Link as LinkIcon, Save, Loader2 } from "lucide-react";
 

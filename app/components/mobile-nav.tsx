@@ -1,15 +1,16 @@
 // app/components/mobile-nav.tsx
 import { NavLink, useNavigate } from "react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   // Ícones Gerais
-  Menu, X, LogOut, ChevronRight, User, Smartphone,
+  Menu, X, LogOut, ChevronRight, User as UserIcon, Smartphone,
   // Ícones User
   LayoutDashboard, TrendingUp, TrendingDown, Car, Calendar, Target,
   // Ícones Admin
   Users, Wallet, ShieldCheck
 } from "lucide-react";
-import { auth } from "~/lib/firebase.client";
+import { supabase } from "~/lib/supabase.client"; // ✅ Import Supabase
+import type { User } from "@supabase/supabase-js";
 
 interface MobileNavProps {
   type?: "user" | "admin";
@@ -20,10 +21,26 @@ export function MobileNav({ type = "user" }: MobileNavProps) {
   const navigate = useNavigate();
   const isAdmin = type === "admin";
   
-  const user = auth.currentUser;
-  const displayName = user?.displayName || (isAdmin ? "Administrador" : "Motorista");
+  // ✅ Estado local para o usuário
+  const [user, setUser] = useState<User | null>(null);
+
+  // ✅ Efeito para carregar e monitorar a sessão
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  
+  // ✅ Mapeamento de dados (Supabase)
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || (isAdmin ? "Administrador" : "Motorista");
   const email = user?.email;
-  const photoURL = user?.photoURL;
+  const photoURL = user?.user_metadata?.avatar_url;
 
   // --- DEFINIÇÃO DE TEMAS ---
   const theme = isAdmin ? {
@@ -74,7 +91,7 @@ export function MobileNav({ type = "user" }: MobileNavProps) {
   const bottomItems = isAdmin ? adminBottomItems : userBottomItems;
 
   const handleLogout = async () => {
-    await auth.signOut();
+    await supabase.auth.signOut(); // ✅ Logout via Supabase
     navigate("/login");
   };
 
@@ -136,7 +153,7 @@ export function MobileNav({ type = "user" }: MobileNavProps) {
                <button onClick={handleProfileClick} className="flex items-center gap-4 w-full p-2 -ml-2 rounded-xl hover:bg-white/5 active:bg-white/10 transition-all group text-left">
                   <div className="relative">
                     <div className="w-12 h-12 rounded-full border-2 border-emerald-500/30 p-0.5 bg-gray-900 overflow-hidden flex items-center justify-center shadow-lg group-hover:border-emerald-500 transition-colors">
-                      {photoURL ? <img src={photoURL} className="w-full h-full rounded-full object-cover"/> : <User className="w-6 h-6 text-emerald-500" />}
+                      {photoURL ? <img src={photoURL} className="w-full h-full rounded-full object-cover"/> : <UserIcon className="w-6 h-6 text-emerald-500" />}
                     </div>
                   </div>
                   <div className="flex-1 min-w-0">

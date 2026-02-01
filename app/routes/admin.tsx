@@ -4,7 +4,7 @@ import type { Route } from "./+types/admin";
 import { Sidebar } from "~/components/sidebar";
 import { MobileNav } from "~/components/mobile-nav";
 import { getAuth } from "firebase/auth";
-import { app } from "~/lib/firebase.client";
+import { app } from "~/lib/app/firebase.client";
 
 // Loader de proteção de rota
 export async function clientLoader({ request }: Route.ClientLoaderArgs) {

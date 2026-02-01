@@ -7,7 +7,7 @@ import {
   TrendingUp, CheckCircle2, Car, Filter, Check, AlertTriangle, 
   DollarSign, X, History, Pencil, Wallet, ArrowRight, Info
 } from "lucide-react";
-import { db, auth } from "~/lib/firebase.client";
+import { db, auth } from "~/lib/app/firebase.client";
 import { Platform } from "~/types/enums";
 import type { Goal, Vehicle } from "~/types/models";
 

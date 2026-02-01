@@ -1,32 +1,39 @@
+// app/routes/_app.tsx
 import { Outlet, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
 import { Sidebar } from "~/components/sidebar";
 import { MobileNav } from "~/components/mobile-nav";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { app } from "~/lib/firebase.client";
-// import { Loader2 } from "lucide-react"; // Não é mais necessário para a animação antiga
+import { supabase } from "~/lib/supabase.client"; // ✅ Agora usa Supabase
 
 export default function AppLayout() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Inicializa o auth apenas no lado do cliente
-    const auth = getAuth(app);
+    // 1. Verifica a sessão inicial ao carregar a página
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate("/login");
+      }
+      setLoading(false);
+    };
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
+    checkSession();
+
+    // 2. Escuta mudanças em tempo real (ex: logout em outra aba, token expirado)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
         navigate("/login");
       }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
   if (loading) {
     return (
-      // Mantive o bg-gray-900 para consistência, mas restaurei o spinner antigo
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
       </div>

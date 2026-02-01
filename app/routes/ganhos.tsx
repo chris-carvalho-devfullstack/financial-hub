@@ -12,7 +12,7 @@ import {
   Pencil, X, Save, Calendar, ExternalLink,
   Info, Target, Layers
 } from "lucide-react";
-import { db, auth } from "~/lib/firebase.client";
+import { db, auth } from "~/lib/app/firebase.client";
 import { Platform } from "~/types/enums";
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
 

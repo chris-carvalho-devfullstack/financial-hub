@@ -1,13 +1,15 @@
 import { NavLink, useNavigate } from "react-router";
+import { useEffect, useState } from "react";
 import { 
   // Ícones Compartilhados
-  LogOut, ChevronRight, User, Smartphone,
+  LogOut, ChevronRight, User as UserIcon, Smartphone,
   // Ícones User
   LayoutDashboard, TrendingUp, TrendingDown, Car, Calendar, Target,
   // Ícones Admin
   Users, Wallet, ShieldCheck
 } from "lucide-react";
-import { auth } from "~/lib/firebase.client";
+import { supabase } from "~/lib/supabase.client"; // ✅ Importando o cliente Supabase
+import type { User } from "@supabase/supabase-js";
 
 interface SidebarProps {
   type?: "user" | "admin";
@@ -17,10 +19,27 @@ export function Sidebar({ type = "user" }: SidebarProps) {
   const navigate = useNavigate();
   const isAdmin = type === "admin";
   
-  // Dados do usuário
-  const user = auth.currentUser;
-  const displayName = user?.displayName || (isAdmin ? "Administrador" : "Motorista");
-  const photoURL = user?.photoURL;
+  // ✅ Estado local para armazenar o usuário (necessário pois o Supabase não tem um "currentUser" síncrono igual ao Firebase)
+  const [user, setUser] = useState<User | null>(null);
+
+  // ✅ Efeito para carregar e monitorar o usuário
+  useEffect(() => {
+    // 1. Pega a sessão inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // 2. Escuta mudanças (Login/Logout) em tempo real
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ✅ Lógica de Exibição (Supabase guarda nome/avatar em user_metadata)
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || (isAdmin ? "Administrador" : "Motorista");
+  const photoURL = user?.user_metadata?.avatar_url;
 
   // --- CONFIGURAÇÃO DE TEMAS ---
   const theme = isAdmin ? {
@@ -52,7 +71,7 @@ export function Sidebar({ type = "user" }: SidebarProps) {
   };
 
   const handleLogout = async () => {
-    await auth.signOut();
+    await supabase.auth.signOut(); // ✅ Logout via Supabase
     navigate("/login");
   };
 
@@ -136,7 +155,7 @@ export function Sidebar({ type = "user" }: SidebarProps) {
                 {photoURL ? (
                   <img src={photoURL} alt="User" className="w-full h-full object-cover" />
                 ) : (
-                  <User size={18} />
+                  <UserIcon size={18} />
                 )}
              </div>
           </div>

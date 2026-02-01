@@ -5,7 +5,7 @@ import {
   Calendar, Wrench, Fuel, TrendingUp, Filter, 
   Car, MapPin, ArrowDownCircle, Route, Flag 
 } from "lucide-react";
-import { db, auth } from "~/lib/firebase.client";
+import { db, auth } from "~/lib/app/firebase.client";
 import type { Vehicle, Transaction, ExpenseTransaction, FuelTransaction, IncomeTransaction } from "~/types/models";
 import { ExpenseCategory } from "~/types/enums";
 
