@@ -9,9 +9,12 @@ import { Loader2 } from "lucide-react";
 export default function AppLayout() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const auth = getAuth(app);
+  // REMOVIDO: const auth = getAuth(app); -> Causava erro no servidor
 
   useEffect(() => {
+    // CORREÇÃO: Inicializa o auth apenas no lado do cliente (navegador)
+    const auth = getAuth(app);
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
         navigate("/login");
@@ -20,7 +23,7 @@ export default function AppLayout() {
     });
 
     return () => unsubscribe();
-  }, [auth, navigate]);
+  }, [navigate]);
 
   if (loading) {
     return (
