@@ -1,26 +1,39 @@
 // app/routes/ganhos.tsx
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { 
   Car, Clock, Map, DollarSign, Briefcase, 
   History, CheckCircle2, Zap, 
   LayoutGrid, ChevronUp, Trash2, Gauge,
   AlertTriangle, Navigation, FileText,
   Pencil, X, Save, Calendar, ExternalLink,
-  Info, Target, Layers
+  Info, Target, Layers, ChevronDown, Check,
+  Hash
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client"; 
 import { Platform } from "~/types/enums"; 
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
 import type { User } from "@supabase/supabase-js";
 
-// === ESTILOS CSS PARA SCROLLBAR MODERNA E ANIMAÇÃO SHIMMER ===
-const SCROLLBAR_STYLES = `
+// === ESTILOS CSS PARA SCROLLBAR MODERNA, ANIMAÇÃO SHIMMER E INPUTS NUMÉRICOS ===
+const GLOBAL_STYLES = `
   .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
   .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+
+  /* Remover setas de input number (Chrome, Safari, Edge, Opera) */
+  input::-webkit-outer-spin-button,
+  input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Remover setas de input number (Firefox) */
+  input[type=number] {
+    -moz-appearance: textfield;
+  }
 
   /* Animação de Shimmer para Skeleton */
   @keyframes shimmer {
@@ -33,6 +46,41 @@ const SCROLLBAR_STYLES = `
     animation: shimmer 1.5s infinite;
   }
 `;
+
+// === MAPA DE LOGOS DE MARCAS ===
+const BRAND_LOGOS: { [key: string]: string } = {
+  'audi': '/logos/brands/audi.png',
+  'bmw': '/logos/brands/bmw.png',
+  'byd': '/logos/brands/byd.png',
+  'caoa chery': '/logos/brands/caoa-chery.png',
+  'chery': '/logos/brands/caoa-chery.png',
+  'chevrolet': '/logos/brands/chevrolet.png',
+  'citroen': '/logos/brands/citroen.png',
+  'fiat': '/logos/brands/fiat.png',
+  'ford': '/logos/brands/ford.png',
+  'honda': '/logos/brands/honda.png',
+  'hyundai': '/logos/brands/hyundai.png',
+  'jac': '/logos/brands/jac.png',
+  'jeep': '/logos/brands/jeep.png',
+  'kia': '/logos/brands/kia.png',
+  'land rover': '/logos/brands/land-rover.png',
+  'mercedes': '/logos/brands/mercedes.png',
+  'mitsubishi': '/logos/brands/mitsubishi.png',
+  'nissan': '/logos/brands/nissan.png',
+  'peugeot': '/logos/brands/peugeot.png',
+  'renault': '/logos/brands/renault.png',
+  'toyota': '/logos/brands/toyota.png',
+  'volkswagen': '/logos/brands/volkswagen.png',
+  'vw': '/logos/brands/volkswagen.png',
+  'volvo': '/logos/brands/volvo.png',
+};
+
+// Helper para pegar a logo da marca
+const getBrandLogo = (brandName: string | undefined) => {
+  if (!brandName) return null;
+  const key = brandName.toLowerCase().trim();
+  return BRAND_LOGOS[key] || null;
+};
 
 // === TIPO LOCAL PARA SUPORTAR O SPLIT E CORRIGIR ERRO TS ===
 interface IncomeTransactionWithSplit extends IncomeTransaction {
@@ -212,6 +260,29 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
+// === COMPONENTE INPUT REUTILIZÁVEL PARA EVITAR RERENDER ===
+const ModalInputField = ({ label, field, type = "number", step="any", readOnly = false, value, onChange }: any) => (
+  <div className={`bg-gray-800/50 p-2 rounded-lg border border-gray-700 ${readOnly ? 'opacity-60' : ''}`}>
+    <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
+    <input 
+      type={type} step={step} readOnly={readOnly}
+      value={value} 
+      onChange={e => !readOnly && onChange(field, e.target.value)}
+      className={`w-full bg-transparent text-white font-bold outline-none border-b text-sm py-1 ${readOnly ? 'border-transparent cursor-not-allowed' : 'border-gray-600 focus:border-emerald-500 transition-colors'}`}
+    />
+  </div>
+);
+
+const ModalDisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
+  <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
+     <div className="flex items-center gap-2">
+       {Icon && <Icon size={16} className={color} />}
+       <span className="text-sm text-gray-400">{label}</span>
+     </div>
+     <span className="font-bold text-white text-sm">{value}</span>
+  </div>
+);
+
 // === MODAL DE DETALHES E EDIÇÃO ===
 function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { isOpen: boolean, onClose: () => void, transaction: IncomeTransactionWithSplit | null, onUpdate: any }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -264,6 +335,10 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
     }
   }, [splitFormData, isEditing]);
 
+  const handleInputChange = (field: string, value: string) => {
+    setFormData((prev: any) => ({ ...prev, [field]: value }));
+  };
+
   if (!isOpen || !transaction) return null;
 
   const isMultiple = (transaction.platform as string) === 'MULTIPLE';
@@ -299,6 +374,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
         }));
       }
 
+      // O onUpdate agora é otimista, então esperamos ele retornar (que será rápido)
       await onUpdate(transaction.id, updates);
       setIsEditing(false);
     } catch (error) {
@@ -313,28 +389,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       setSaving(false);
     }
   };
-
-  const InputField = ({ label, field, type = "number", step="any", readOnly = false }: any) => (
-    <div className={`bg-gray-800/50 p-2 rounded-lg border border-gray-700 ${readOnly ? 'opacity-60' : ''}`}>
-      <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
-      <input 
-        type={type} step={step} readOnly={readOnly}
-        value={formData[field]} 
-        onChange={e => !readOnly && setFormData({...formData, [field]: e.target.value})}
-        className={`w-full bg-transparent text-white font-bold outline-none border-b text-sm py-1 ${readOnly ? 'border-transparent cursor-not-allowed' : 'border-gray-600 focus:border-emerald-500'}`}
-      />
-    </div>
-  );
-
-  const DisplayField = ({ label, value, icon: Icon, color = "text-gray-400" }: any) => (
-    <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded-lg border border-gray-800">
-       <div className="flex items-center gap-2">
-         {Icon && <Icon size={16} className={color} />}
-         <span className="text-sm text-gray-400">{label}</span>
-       </div>
-       <span className="font-bold text-white text-sm">{value}</span>
-    </div>
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -413,23 +467,23 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                  )}
 
                  <div className="col-span-2">
-                    <InputField label={isMultiple ? "Valor Total (Calculado)" : "Valor (R$)"} field="amount" step="0.01" readOnly={isMultiple} />
+                    <ModalInputField label={isMultiple ? "Valor Total (Calculado)" : "Valor (R$)"} field="amount" step="0.01" readOnly={isMultiple} value={formData.amount} onChange={handleInputChange} />
                  </div>
                  <div className="col-span-2">
-                    <InputField label="Data" field="date" type="date" />
+                    <ModalInputField label="Data" field="date" type="date" value={formData.date} onChange={handleInputChange} />
                  </div>
-                 <InputField label="KM Trip" field="distanceDriven" />
-                 <InputField label="Odômetro" field="odometer" />
-                 <InputField label="Média Painel" field="clusterKmPerLiter" step="0.1" />
-                 <InputField label="Horas Online" field="onlineDurationMinutes" step="0.1" />
-                 <InputField label={isMultiple ? "Viagens Total" : "Viagens"} field="tripsCount" readOnly={isMultiple} />
+                 <ModalInputField label="KM Trip" field="distanceDriven" value={formData.distanceDriven} onChange={handleInputChange} />
+                 <ModalInputField label="Odômetro" field="odometer" value={formData.odometer} onChange={handleInputChange} />
+                 <ModalInputField label="Média Painel" field="clusterKmPerLiter" step="0.1" value={formData.clusterKmPerLiter} onChange={handleInputChange} />
+                 <ModalInputField label="Horas Online" field="onlineDurationMinutes" step="0.1" value={formData.onlineDurationMinutes} onChange={handleInputChange} />
+                 <ModalInputField label={isMultiple ? "Viagens Total" : "Viagens"} field="tripsCount" readOnly={isMultiple} value={formData.tripsCount} onChange={handleInputChange} />
                  <div className="col-span-2">
                    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
                       <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">Observação</label>
                       <input 
                         type="text"
                         value={formData.description} 
-                        onChange={e => setFormData({...formData, description: e.target.value})}
+                        onChange={e => handleInputChange('description', e.target.value)}
                         className="w-full bg-transparent text-white font-medium outline-none border-b border-gray-600 focus:border-emerald-500 text-sm py-1"
                       />
                    </div>
@@ -474,11 +528,11 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                  )}
 
                  <div className="grid grid-cols-2 gap-3">
-                    <DisplayField label="KM Trip" value={`${formData.distanceDriven} km`} icon={Map} color="text-blue-500" />
-                    <DisplayField label="Odômetro" value={`${formData.odometer} km`} icon={Navigation} color="text-emerald-500" />
-                    <DisplayField label="Média" value={`${formData.clusterKmPerLiter} km/l`} icon={Gauge} color="text-orange-500" />
-                    <DisplayField label="Duração" value={`${formData.onlineDurationMinutes} h`} icon={Clock} color="text-yellow-500" />
-                    <DisplayField label="Viagens Totais" value={formData.tripsCount} icon={Briefcase} color="text-purple-500" />
+                    <ModalDisplayField label="KM Trip" value={`${formData.distanceDriven} km`} icon={Map} color="text-blue-500" />
+                    <ModalDisplayField label="Odômetro" value={`${formData.odometer} km`} icon={Navigation} color="text-emerald-500" />
+                    <ModalDisplayField label="Média" value={`${formData.clusterKmPerLiter} km/l`} icon={Gauge} color="text-orange-500" />
+                    <ModalDisplayField label="Duração" value={`${formData.onlineDurationMinutes} h`} icon={Clock} color="text-yellow-500" />
+                    <ModalDisplayField label="Viagens Totais" value={formData.tripsCount} icon={Briefcase} color="text-purple-500" />
                  </div>
 
                  {formData.description && (
@@ -494,30 +548,41 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
         </div>
 
         {/* FOOTER */}
-        <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex gap-3">
-           {isEditing ? (
-             <>
+        <div className="p-4 border-t border-gray-800 bg-gray-900/50 flex flex-col gap-3">
+           <div className="flex gap-3">
+             {isEditing ? (
+               <>
+                 <button 
+                   onClick={() => setIsEditing(false)}
+                   className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors cursor-pointer"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={handleSave}
+                   disabled={saving}
+                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                 >
+                   {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
+                 </button>
+               </>
+             ) : (
                <button 
-                 onClick={() => setIsEditing(false)}
-                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors cursor-pointer"
+                 onClick={() => setIsEditing(true)}
+                 className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700 cursor-pointer"
                >
-                 Cancelar
+                 <Pencil size={18} /> Editar Lançamento
                </button>
-               <button 
-                 onClick={handleSave}
-                 disabled={saving}
-                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer"
-               >
-                 {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
-               </button>
-             </>
-           ) : (
-             <button 
-               onClick={() => setIsEditing(true)}
-               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700 cursor-pointer"
-             >
-               <Pencil size={18} /> Editar Lançamento
-             </button>
+             )}
+           </div>
+           
+           {/* ID DISCRETO NO FOOTER */}
+           {!isEditing && (
+             <div className="flex justify-center mt-2 opacity-30 hover:opacity-100 transition-opacity">
+               <span className="text-[9px] text-gray-500 font-mono flex items-center gap-1 select-all cursor-text">
+                 <Hash size={9} /> ID: {transaction.id}
+               </span>
+             </div>
            )}
         </div>
 
@@ -560,8 +625,21 @@ export default function GanhosPage() {
   const [clusterAvg, setClusterAvg] = useState(""); 
   const [hours, setHours] = useState("");
   const [description, setDescription] = useState(""); 
+  const [isVehicleDropdownOpen, setIsVehicleDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
+
+  // Fecha dropdown ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsVehicleDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // 1. Auth Init
   useEffect(() => {
@@ -675,7 +753,6 @@ export default function GanhosPage() {
   }, [user, fetchGoals]);
 
   // === 5. CORE REALTIME LOGIC PARA TRANSAÇÕES (Otimizado com State Management Reativo) ===
-  // Lógica: Carga inicial + Manipulação direta do estado via Socket
   useEffect(() => {
     if (!user || !selectedVehicle) return;
 
@@ -858,6 +935,13 @@ export default function GanhosPage() {
       const promises = [];
 
       if (finalOdometer > startOdometer) {
+         // Atualiza LOCALMENTE os veículos para refletir o odômetro na hora
+         setVehicles(prev => prev.map(v => 
+            v.id === selectedVehicle 
+              ? { ...v, currentOdometer: finalOdometer } 
+              : v
+         ));
+
          promises.push(supabase.from('vehicles').update({
             current_odometer: finalOdometer,
             last_odometer_date: new Date(`${date}T12:00:00`).toISOString(),
@@ -896,7 +980,8 @@ export default function GanhosPage() {
       // Limpa formulário
       setAmount("");
       setDistance("");
-      setOdometerInput(""); 
+      // AQUI A MUDANÇA: Atualiza o odômetro para o NOVO valor, ao invés de limpar
+      setOdometerInput(String(finalOdometer)); 
       setHours("");
       setTrips("");
       setClusterAvg(""); 
@@ -918,11 +1003,59 @@ export default function GanhosPage() {
     }
   };
 
-  const handleUpdateTransaction = async (id: string, data: any) => {
+  // === OTIMIZAÇÃO: EDIÇÃO OTIMISTA (INSTANTÂNEA) ===
+  const handleUpdateTransaction = async (id: string, updates: any) => {
+     // 1. Snapshot do estado anterior
+     const previousGains = [...recentGains];
+     const existingItem = recentGains.find(g => g.id === id);
+     
+     if (!existingItem) return;
+
+     // 2. Determinar o novo objeto para UI imediata (Mapeia chaves do DB para UI)
+     const optimisticItem: IncomeTransactionWithSplit = {
+        ...existingItem,
+        amount: updates.amount,
+        date: updates.date,
+        distanceDriven: updates.distance,
+        odometer: updates.odometer,
+        clusterKmPerLiter: updates.cluster_km_per_liter,
+        onlineDurationMinutes: updates.duration ? updates.duration / 60 : existingItem.onlineDurationMinutes,
+        tripsCount: updates.trip_count,
+        description: updates.notes,
+        // Se tiver split
+        split: updates.split || existingItem.split
+     };
+
+     // 3. Atualizar UI imediatamente
+     setRecentGains(prev => prev.map(item => item.id === id ? optimisticItem : item));
+     setSelectedTransaction(optimisticItem); // Atualiza modal se estiver aberto
+
      try {
-       await supabase.from('transactions').update(data).eq('id', id);
+       // 4. Envia para o servidor em segundo plano
+       const { error } = await supabase.from('transactions').update(updates).eq('id', id);
+       
+       if (error) throw error;
+       
+       setFeedback({
+          isOpen: true,
+          type: 'success',
+          title: 'Atualizado',
+          message: 'Lançamento atualizado com sucesso.'
+       });
+
      } catch (error) {
-       throw error;
+       console.error(error);
+       
+       // 5. ROLLBACK: Reverte o estado se der erro
+       setRecentGains(previousGains);
+       setSelectedTransaction(existingItem);
+       
+       setFeedback({
+          isOpen: true,
+          type: 'error',
+          title: 'Erro ao Atualizar',
+          message: 'Falha ao salvar alterações. Os dados foram restaurados.'
+       });
      }
   };
 
@@ -931,22 +1064,50 @@ export default function GanhosPage() {
     setItemToDelete(id);
   };
 
+  // === OTIMIZAÇÃO: EXCLUSÃO OTIMISTA (INSTANTÂNEA) ===
   const confirmDelete = async () => {
     if (!itemToDelete) return;
-    setDeletingId(itemToDelete);
+    
+    const idToDelete = itemToDelete;
+    
+    // 1. BACKUP: Guarda o estado atual caso precise reverter
+    const previousGains = [...recentGains];
+
+    // 2. OTIMISMO: Remove da tela IMEDIATAMENTE (Sensação de Instantâneo)
+    setRecentGains(prev => prev.filter(item => item.id !== idToDelete));
+    
+    // Fecha o modal imediatamente
+    setDeletingId(idToDelete); 
+    setItemToDelete(null);
+
     try { 
-      await supabase.from('transactions').delete().eq('id', itemToDelete); 
+      // 3. ENVIA: Manda para o servidor em segundo plano
+      const { error } = await supabase.from('transactions').delete().eq('id', idToDelete); 
+      
+      if (error) throw error;
+      
+      // Sucesso: Feedback visual para o usuário
+      setFeedback({
+        isOpen: true,
+        type: 'success',
+        title: 'Excluído',
+        message: 'Registro removido com sucesso.'
+      });
+
     } catch (e) { 
       console.error(e); 
+      
+      // 4. ROLLBACK: Se der erro, volta o item para a lista
+      setRecentGains(previousGains);
+      
       setFeedback({
         isOpen: true,
         type: 'error',
         title: 'Erro ao Excluir',
-        message: 'Não foi possível excluir o registro.'
+        message: 'Não foi possível excluir o registro. Ele foi restaurado.'
       });
     } finally { 
       setDeletingId(null); 
-      setItemToDelete(null);
     }
   };
 
@@ -958,10 +1119,13 @@ export default function GanhosPage() {
     return ALL_PLATFORMS.find(p => p.id === id) || ALL_PLATFORMS[5];
   };
 
+  // Encontra o veículo selecionado para exibir no dropdown customizado
+  const activeVehicle = vehicles.find(v => v.id === selectedVehicle);
+
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
-      <style>{SCROLLBAR_STYLES}</style>
+      <style>{GLOBAL_STYLES}</style>
 
       {feedback && (
           <FeedbackModal 
@@ -1000,25 +1164,69 @@ export default function GanhosPage() {
 
           <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
               
-             <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 active:border-emerald-500/50 transition-colors">
+             <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 transition-colors relative z-20">
                <label className="text-gray-400 text-xs font-bold uppercase mb-2 block tracking-wider">Veículo</label>
-               <div className="relative">
-                  <Car className="absolute left-3 top-3.5 text-gray-500" size={18} />
-                  <select 
-                    value={selectedVehicle}
-                    onChange={async (e) => {
-                        const newId = e.target.value;
-                        setSelectedVehicle(newId);
-                        if (user) {
-                            await supabase.from('profiles').update({ last_selected_vehicle_id: newId }).eq('id', user.id);
-                        }
-                    }}
-                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-emerald-500 outline-none appearance-none font-medium h-12 cursor-pointer"
+               
+               {/* DROPDOWN CUSTOMIZADO DE VEÍCULOS */}
+               <div className="relative" ref={dropdownRef}>
+                  <button 
+                    type="button"
+                    onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-700/80 transition-colors focus:ring-2 focus:ring-emerald-500 outline-none h-14"
                   >
-                    {vehicles.map(v => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
-                  </select>
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center p-1 border border-gray-600 overflow-hidden">
+                           {activeVehicle ? (
+                             getBrandLogo(activeVehicle.brand) ? (
+                               <img src={getBrandLogo(activeVehicle.brand)!} alt={activeVehicle.brand} className="w-full h-full object-contain" />
+                             ) : <Car size={16} className="text-gray-400"/>
+                           ) : <Car size={16} className="text-gray-400"/>}
+                        </div>
+                        <div className="flex flex-col items-start">
+                           <span className="font-bold text-sm leading-tight">{activeVehicle?.name || 'Selecione um veículo'}</span>
+                           {activeVehicle && <span className="text-[10px] text-gray-400 leading-tight uppercase">{activeVehicle.licensePlate}</span>}
+                        </div>
+                     </div>
+                     <ChevronDown size={18} className={`text-gray-400 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isVehicleDropdownOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200 max-h-60 overflow-y-auto custom-scrollbar">
+                       {vehicles.map(v => {
+                          const isSelected = selectedVehicle === v.id;
+                          const logo = getBrandLogo(v.brand);
+                          return (
+                            <button
+                               key={v.id}
+                               type="button"
+                               onClick={async () => {
+                                  setSelectedVehicle(v.id);
+                                  setIsVehicleDropdownOpen(false);
+                                  if (user) {
+                                      await supabase.from('profiles').update({ last_selected_vehicle_id: v.id }).eq('id', user.id);
+                                  }
+                               }}
+                               className={`w-full p-3 flex items-center justify-between border-b border-gray-800 last:border-0 transition-colors ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/20' : 'hover:bg-gray-800'}`}
+                            >
+                               <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center p-1 border overflow-hidden ${isSelected ? 'bg-emerald-500/20 border-emerald-500' : 'bg-gray-800 border-gray-700'}`}>
+                                     {logo ? <img src={logo} className="w-full h-full object-contain" /> : <Car size={14} className={isSelected ? 'text-emerald-400' : 'text-gray-500'}/>}
+                                  </div>
+                                  <div className="text-left">
+                                     <div className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>{v.name}</div>
+                                     <div className="text-[10px] text-gray-500 uppercase">{v.brand} • {v.licensePlate}</div>
+                                  </div>
+                               </div>
+                               {isSelected && (
+                                 <div className="flex items-center gap-1 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-lg shadow-emerald-500/20">
+                                    <Check size={10} /> Ativo
+                                 </div>
+                               )}
+                            </button>
+                          )
+                       })}
+                    </div>
+                  )}
                </div>
             </div>
 
