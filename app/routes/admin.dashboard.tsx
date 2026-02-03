@@ -28,13 +28,19 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Busca perfis no Supabase
-        const { data: usersData, error } = await supabase.from('profiles').select('*');
+        // BUSCA SEGURA DE ADMIN (Usa RPC para furar RLS)
+        const { data: usersData, error } = await supabase.rpc('get_all_profiles_admin');
         
         if (error) throw error;
+        
+        // Se a RPC retornar null/undefined por algum motivo
+        if (!usersData) {
+            setLoading(false);
+            return;
+        }
 
         // Mapeamento snake_case -> camelCase local para manter lógica
-        const users = usersData.map(u => ({
+        const users = usersData.map((u: any) => ({
             uid: u.id,
             plan: u.plan,
             subscriptionStatus: u.subscription_status,
@@ -54,7 +60,7 @@ export default function AdminDashboard() {
         
         const churnMap = new Map<string, number>();
 
-        users.forEach(user => {
+        users.forEach((user: any) => {
           if (user.plan === 'PRO' && user.subscriptionStatus === 'ACTIVE') {
             activePros++;
             if (user.createdAt && new Date(user.createdAt) >= firstDayOfMonth) {

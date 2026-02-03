@@ -1,7 +1,16 @@
 .DS_Store
 .env
-/node_modules/
 
-# React Router
+# Dependencies
+/node_modules/
+migration-scripts/node_modules/
+
+# Secrets & Keys (Adicione esta linha abaixo)
+migration-scripts/serviceAccountKey.json
+
+# React Router & Build
 /.react-router/
 /build/
+
+# Cloudflare
+.wrangler/

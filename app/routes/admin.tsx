@@ -13,9 +13,18 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
     return redirect("/login");
   }
 
-  // Opcional: Verificar se o usuário é ADMIN na tabela profiles
-  // const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  // if (profile?.role !== 'ADMIN') return redirect("/dashboard");
+  // SEGURANÇA ATIVADA: Verifica se o usuário é realmente ADMIN
+  // Como habilitamos o RLS, o usuário só consegue ler seu próprio perfil.
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  // Se não encontrar perfil, der erro ou role não for ADMIN -> Redireciona
+  if (error || !profile || profile.role !== 'ADMIN') {
+    return redirect("/dashboard");
+  }
 
   return null;
 }

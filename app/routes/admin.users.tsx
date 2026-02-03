@@ -16,7 +16,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
-import type { UserProfile, Vehicle, Transaction } from "~/types/models";
+import type { UserProfile, Vehicle } from "~/types/models";
 
 // --- Sub-componente: Badge de Status (Mantido igual) ---
 const StatusBadge = ({ status, type = 'status' }: { status: string, type?: 'status' | 'plan' | 'role' }) => {
@@ -234,13 +234,15 @@ export default function AdminUsers() {
 
   // --- Listener do Supabase (Realtime) ---
   const fetchUsers = useCallback(async () => {
-    const { data, error } = await supabase.from('profiles').select('*');
+    // ATUALIZAÇÃO IMPORTANTE: Usa RPC para buscar TODOS os usuários (mesmo com RLS ativo)
+    const { data, error } = await supabase.rpc('get_all_profiles_admin');
+    
     if (error) {
+        console.error("Erro RPC Profiles:", error);
         setError("Erro ao carregar usuários.");
     } else if (data) {
-        const mappedUsers = data.map(u => ({
+        const mappedUsers = data.map((u: any) => ({
             id: u.id,
-            // uid mantido para compatibilidade com o resto do código que pode usar esse nome
             uid: u.id, 
             email: u.email || 'Sem email',
             name: u.name || 'Anônimo',
@@ -250,11 +252,10 @@ export default function AdminUsers() {
             photoUrl: u.photo_url || u.avatar_url,
             createdAt: u.created_at,
             lastLogin: u.last_login
-        })) as unknown as UserProfile[];
+        })) as UserProfile[];
         
         setUsers(mappedUsers);
         
-        // Atualiza o user selecionado em tempo real se estiver aberto
         if (selectedUser) {
             const updated = mappedUsers.find(u => u.id === selectedUser.id);
             if (updated) setSelectedUser(updated);
@@ -266,7 +267,6 @@ export default function AdminUsers() {
   useEffect(() => {
     fetchUsers();
     
-    // Configura Realtime
     const channel = supabase.channel('admin-users-list')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
             fetchUsers();
@@ -285,29 +285,34 @@ export default function AdminUsers() {
     setUserStats({ income: 0, expense: 0 });
 
     try {
-      // Fetch veículos
-      const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
-      if (vData) {
-          const mappedVehicles = vData.map(v => ({
+      // 1. Fetch Veículos (Usando RPC Admin para furar o RLS)
+      const { data: allVehicles } = await supabase.rpc('get_all_vehicles_admin');
+      if (allVehicles) {
+          // Filtra no JS pois a RPC traz tudo
+          const myVehicles = allVehicles.filter((v: any) => v.user_id === user.id);
+          const mappedVehicles = myVehicles.map((v: any) => ({
               ...v,
               currentOdometer: v.current_odometer,
               userId: v.user_id
           }));
-          setUserVehicles(mappedVehicles as any);
+          setUserVehicles(mappedVehicles);
       }
 
-      // Fetch Stats (Transactions)
-      const { data: tData } = await supabase.from('transactions').select('amount, type').eq('user_id', user.id);
-      if (tData) {
+      // 2. Fetch Transações (Usando RPC Admin)
+      const { data: allTransactions } = await supabase.rpc('get_all_transactions_admin');
+      if (allTransactions) {
           let inc = 0, exp = 0;
-          tData.forEach(t => {
-              if (t.type === 'INCOME') inc += (t.amount || 0);
-              else exp += (t.amount || 0);
+          allTransactions.forEach((t: any) => {
+             if (t.user_id === user.id) {
+                 if (t.type === 'INCOME') inc += Number(t.amount || 0);
+                 else exp += Number(t.amount || 0);
+             }
           });
           setUserStats({ income: inc, expense: exp });
       }
+
     } catch (e) {
-      console.error(e);
+      console.error("Erro ao carregar detalhes do usuário:", e);
     } finally {
       setLoadingDetails(false);
     }
@@ -322,7 +327,6 @@ export default function AdminUsers() {
   const handleSaveUser = async (data: Partial<UserProfile>) => {
     if (!userToEdit) return;
     try {
-      // Mapeamento reverso (Frontend -> Banco)
       const updateData: any = {};
       if (data.name) updateData.name = data.name;
       if (data.plan) updateData.plan = data.plan;
@@ -365,7 +369,7 @@ export default function AdminUsers() {
     }
   };
 
-  const formatMoney = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatMoney = (cents: number) => (cents).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatDate = (dateString?: string) => dateString ? new Date(dateString).toLocaleDateString('pt-BR') : '-';
 
   return (
