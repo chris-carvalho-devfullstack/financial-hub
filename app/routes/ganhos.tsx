@@ -8,7 +8,7 @@ import {
   AlertTriangle, Navigation, FileText,
   Pencil, X, Save, Calendar, ExternalLink,
   Info, Target, Layers, ChevronDown, Check,
-  Hash
+  Hash, Plus
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client"; 
 import { Platform } from "~/types/enums"; 
@@ -196,6 +196,17 @@ function TransactionSkeleton() {
 
 // --- COMPONENTE DE FEEDBACK ---
 function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: any) {
+  // Lock Scroll do Body
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const isSuccess = type === 'success';
@@ -228,6 +239,17 @@ function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: an
 }
 
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
+  // Lock Scroll do Body
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -290,6 +312,20 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
   const [splitFormData, setSplitFormData] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
+
+  // === NOVO: BLOQUEIO DE SCROLL DO BODY ===
+  useEffect(() => {
+    if (isOpen) {
+      // Salva o estilo original (geralmente 'unset' ou vazio)
+      const originalOverflow = document.body.style.overflow;
+      // Bloqueia scroll
+      document.body.style.overflow = 'hidden';
+      // Restaura ao fechar/desmontar
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (transaction) {
@@ -602,6 +638,9 @@ export default function GanhosPage() {
   const [recentGains, setRecentGains] = useState<IncomeTransactionWithSplit[]>([]);
   const [isLoadingInitial, setIsLoadingInitial] = useState(true); // Loading apenas inicial
   
+  // Estado para controlar o formulário no mobile
+  const [isMobileFormOpen, setIsMobileFormOpen] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
@@ -789,16 +828,20 @@ export default function GanhosPage() {
                  setRecentGains(prev => {
                      // DEDUPLICAÇÃO: Se já adicionamos manualmente no handleSave, não adiciona de novo
                      if (prev.some(item => item.id === newTx.id)) return prev;
-                     return [newTx, ...prev];
+                     // ADICIONA E REORDENA POR DATA
+                     return [newTx, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                  });
              } 
              // 2. DELETE: Remove da lista
              else if (payload.eventType === 'DELETE') {
                  setRecentGains(prev => prev.filter(item => item.id !== payload.old.id));
              }
-             // 3. UPDATE: Atualiza o item na lista
+             // 3. UPDATE: Atualiza o item na lista E REORDENA
              else if (payload.eventType === 'UPDATE' && payload.new.type === 'INCOME') {
-                 setRecentGains(prev => prev.map(item => item.id === payload.new.id ? mapTransactionFromDB(payload.new) : item));
+                 setRecentGains(prev => 
+                    prev.map(item => item.id === payload.new.id ? mapTransactionFromDB(payload.new) : item)
+                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                 );
              }
          }
        )
@@ -925,10 +968,12 @@ export default function GanhosPage() {
 
       if (txError) throw txError;
 
-      // ATUALIZAÇÃO OTIMISTA: Atualiza o estado imediatamente com o dado retornado
+      // ATUALIZAÇÃO OTIMISTA: Atualiza o estado imediatamente com o dado retornado E REORDENA
       if (insertedData) {
           const newTransaction = mapTransactionFromDB(insertedData);
-          setRecentGains(prev => [newTransaction, ...prev]);
+          setRecentGains(prev => 
+             [newTransaction, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          );
       }
 
       // Atualizações paralelas (não bloqueiam o fluxo principal visual - Fire and Forget)
@@ -990,6 +1035,7 @@ export default function GanhosPage() {
       setSelectedPlatforms([]);
       setSplitData({});
       
+      setIsMobileFormOpen(false); // Fecha o formulário no mobile após salvar
       setSaving(false);
     } catch (error) {
       console.error(error);
@@ -1026,8 +1072,11 @@ export default function GanhosPage() {
         split: updates.split || existingItem.split
      };
 
-     // 3. Atualizar UI imediatamente
-     setRecentGains(prev => prev.map(item => item.id === id ? optimisticItem : item));
+     // 3. Atualizar UI imediatamente E REORDENAR (Caso a data mude)
+     setRecentGains(prev => 
+        prev.map(item => item.id === id ? optimisticItem : item)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+     );
      setSelectedTransaction(optimisticItem); // Atualiza modal se estiver aberto
 
      try {
@@ -1155,356 +1204,393 @@ export default function GanhosPage() {
       <div className="flex flex-col md:flex-row gap-8 items-start">
         <div className="flex-1 w-full md:max-w-2xl">
           
-          <header className="mb-6 md:h-[88px] flex flex-col justify-center">
-            <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
-              <Zap className="text-yellow-500 fill-yellow-500" size={28} /> Registrar Ganho
-            </h1>
-            <p className="text-gray-400 text-sm md:text-base">Selecione o(s) app(s) e lance o faturamento.</p>
-          </header>
-
-          <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
+          {/* --- NOVO: CABEÇALHO MOBILE + BOTÃO DE TOGGLE --- */}
+          <div className="md:hidden mb-6">
+              <h1 className="text-2xl font-bold text-white flex items-center gap-2 mb-4">
+                <Zap className="text-yellow-500 fill-yellow-500" size={28} /> Ganhos
+              </h1>
               
-             <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 transition-colors relative z-20">
-               <label className="text-gray-400 text-xs font-bold uppercase mb-2 block tracking-wider">Veículo</label>
-               
-               {/* DROPDOWN CUSTOMIZADO DE VEÍCULOS */}
-               <div className="relative" ref={dropdownRef}>
-                  <button 
-                    type="button"
-                    onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
-                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-700/80 transition-colors focus:ring-2 focus:ring-emerald-500 outline-none h-14"
-                  >
-                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center p-1 border border-gray-600 overflow-hidden">
-                           {activeVehicle ? (
-                             getBrandLogo(activeVehicle.brand) ? (
-                               <img src={getBrandLogo(activeVehicle.brand)!} alt={activeVehicle.brand} className="w-full h-full object-contain" />
-                             ) : <Car size={16} className="text-gray-400"/>
-                           ) : <Car size={16} className="text-gray-400"/>}
-                        </div>
-                        <div className="flex flex-col items-start">
-                           <span className="font-bold text-sm leading-tight">{activeVehicle?.name || 'Selecione um veículo'}</span>
-                           {activeVehicle && <span className="text-[10px] text-gray-400 leading-tight uppercase">{activeVehicle.licensePlate}</span>}
-                        </div>
-                     </div>
-                     <ChevronDown size={18} className={`text-gray-400 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
-                  </button>
+              <button 
+                onClick={() => setIsMobileFormOpen(!isMobileFormOpen)}
+                className={`w-full p-4 rounded-2xl border transition-all duration-300 flex items-center justify-between group active:scale-[0.98] shadow-lg ${
+                  isMobileFormOpen 
+                    ? 'bg-gray-800 border-gray-700 text-gray-300' 
+                    : 'bg-emerald-600 border-emerald-500 text-white'
+                }`}
+              >
+                 <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full transition-colors ${isMobileFormOpen ? 'bg-gray-700' : 'bg-white/20'}`}>
+                       {isMobileFormOpen ? <X size={20} /> : <Plus size={20} />}
+                    </div>
+                    <div className="text-left">
+                       <span className="font-bold text-base block">
+                          {isMobileFormOpen ? "Cancelar Lançamento" : "Adicionar Novo Ganho"}
+                       </span>
+                       {!isMobileFormOpen && <span className="text-xs opacity-90 font-medium">Toque para abrir o formulário</span>}
+                    </div>
+                 </div>
+                 <ChevronDown size={20} className={`transition-transform duration-300 ${isMobileFormOpen ? 'rotate-180' : ''}`}/>
+              </button>
+          </div>
 
-                  {isVehicleDropdownOpen && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200 max-h-60 overflow-y-auto custom-scrollbar">
-                       {vehicles.map(v => {
-                          const isSelected = selectedVehicle === v.id;
-                          const logo = getBrandLogo(v.brand);
-                          return (
-                            <button
-                               key={v.id}
-                               type="button"
-                               onClick={async () => {
-                                  setSelectedVehicle(v.id);
-                                  setIsVehicleDropdownOpen(false);
-                                  if (user) {
-                                      await supabase.from('profiles').update({ last_selected_vehicle_id: v.id }).eq('id', user.id);
-                                  }
-                               }}
-                               className={`w-full p-3 flex items-center justify-between border-b border-gray-800 last:border-0 transition-colors ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/20' : 'hover:bg-gray-800'}`}
-                            >
-                               <div className="flex items-center gap-3">
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center p-1 border overflow-hidden ${isSelected ? 'bg-emerald-500/20 border-emerald-500' : 'bg-gray-800 border-gray-700'}`}>
-                                     {logo ? <img src={logo} className="w-full h-full object-contain" /> : <Car size={14} className={isSelected ? 'text-emerald-400' : 'text-gray-500'}/>}
+          {/* --- WRAPPER ANIMADO (ACORDEÃO NO MOBILE) --- */}
+          <div className={`
+              transform transition-all duration-500 ease-in-out overflow-hidden
+              ${isMobileFormOpen ? 'max-h-[3000px] opacity-100 translate-y-0 mb-8' : 'max-h-0 opacity-0 -translate-y-4 md:max-h-none md:opacity-100 md:translate-y-0 md:mb-0 md:overflow-visible'}
+          `}>
+
+              <header className="mb-6 md:h-[88px] flex-col justify-center hidden md:flex">
+                <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
+                  <Zap className="text-yellow-500 fill-yellow-500" size={28} /> Registrar Ganho
+                </h1>
+                <p className="text-gray-400 text-sm md:text-base">Selecione o(s) app(s) e lance o faturamento.</p>
+              </header>
+
+              <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
+                  
+                 <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 transition-colors relative z-20">
+                   <label className="text-gray-400 text-xs font-bold uppercase mb-2 block tracking-wider">Veículo</label>
+                   
+                   {/* DROPDOWN CUSTOMIZADO DE VEÍCULOS */}
+                   <div className="relative" ref={dropdownRef}>
+                      <button 
+                        type="button"
+                        onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
+                        className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-700/80 transition-colors focus:ring-2 focus:ring-emerald-500 outline-none h-14"
+                      >
+                         <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center p-1 border border-gray-600 overflow-hidden">
+                               {activeVehicle ? (
+                                 getBrandLogo(activeVehicle.brand) ? (
+                                   <img src={getBrandLogo(activeVehicle.brand)!} alt={activeVehicle.brand} className="w-full h-full object-contain" />
+                                 ) : <Car size={16} className="text-gray-400"/>
+                               ) : <Car size={16} className="text-gray-400"/>}
+                            </div>
+                            <div className="flex flex-col items-start">
+                               <span className="font-bold text-sm leading-tight">{activeVehicle?.name || 'Selecione um veículo'}</span>
+                               {activeVehicle && <span className="text-[10px] text-gray-400 leading-tight uppercase">{activeVehicle.licensePlate}</span>}
+                            </div>
+                         </div>
+                         <ChevronDown size={18} className={`text-gray-400 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      {isVehicleDropdownOpen && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200 max-h-60 overflow-y-auto custom-scrollbar">
+                           {vehicles.map(v => {
+                              const isSelected = selectedVehicle === v.id;
+                              const logo = getBrandLogo(v.brand);
+                              return (
+                                <button
+                                   key={v.id}
+                                   type="button"
+                                   onClick={async () => {
+                                      setSelectedVehicle(v.id);
+                                      setIsVehicleDropdownOpen(false);
+                                      if (user) {
+                                          await supabase.from('profiles').update({ last_selected_vehicle_id: v.id }).eq('id', user.id);
+                                      }
+                                   }}
+                                   className={`w-full p-3 flex items-center justify-between border-b border-gray-800 last:border-0 transition-colors ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/20' : 'hover:bg-gray-800'}`}
+                                >
+                                   <div className="flex items-center gap-3">
+                                      <div className={`w-8 h-8 rounded-full flex items-center justify-center p-1 border overflow-hidden ${isSelected ? 'bg-emerald-500/20 border-emerald-500' : 'bg-gray-800 border-gray-700'}`}>
+                                         {logo ? <img src={logo} className="w-full h-full object-contain" /> : <Car size={14} className={isSelected ? 'text-emerald-400' : 'text-gray-500'}/>}
+                                      </div>
+                                      <div className="text-left">
+                                         <div className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>{v.name}</div>
+                                         <div className="text-[10px] text-gray-500 uppercase">{v.brand} • {v.licensePlate}</div>
+                                      </div>
+                                   </div>
+                                   {isSelected && (
+                                     <div className="flex items-center gap-1 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-lg shadow-emerald-500/20">
+                                        <Check size={10} /> Ativo
+                                     </div>
+                                   )}
+                                </button>
+                              )
+                           })}
+                        </div>
+                      )}
+                   </div>
+                </div>
+
+                <div>
+                   <label className="text-gray-400 text-xs font-bold uppercase mb-3 block tracking-wider">
+                     Plataforma(s) {selectedPlatforms.length > 0 && <span className="text-emerald-500 ml-1">({selectedPlatforms.length})</span>}
+                   </label>
+                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                      {displayedPlatforms.map((p) => {
+                         const isSelected = selectedPlatforms.includes(p.id);
+                         return (
+                           <button
+                             key={p.id}
+                             type="button"
+                             onClick={() => togglePlatform(p.id as Platform)}
+                             className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 cursor-pointer ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
+                           >
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
+                                {p.logo ? <img src={p.logo} alt={p.label} className="w-full h-full object-cover" /> : p.icon}
+                              </div>
+                              <span className="font-bold text-sm tracking-tight">{p.label}</span>
+                              {isSelected && <CheckCircle2 size={18} className="absolute top-2 right-2 text-white drop-shadow-md" />}
+                           </button>
+                         )
+                      })}
+                      {!showAllPlatforms && (
+                        <button type="button" onClick={() => setShowAllPlatforms(true)} className="h-28 rounded-2xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex flex-col items-center justify-center gap-2 group active:scale-95 cursor-pointer">
+                          <div className="w-10 h-10 rounded-xl bg-gray-800 flex items-center justify-center group-hover:bg-gray-700"><LayoutGrid size={20} /></div>
+                          <span className="font-bold text-sm">Ver Mais</span>
+                        </button>
+                      )}
+                      {showAllPlatforms && (
+                        <button type="button" onClick={() => setShowAllPlatforms(false)} className="h-28 rounded-2xl border border-dashed border-gray-700 bg-transparent text-gray-500 hover:text-white hover:border-gray-500 transition-all flex flex-col items-center justify-center gap-1 active:scale-95 cursor-pointer">
+                          <ChevronUp size={24} /><span className="text-xs font-medium">Recolher</span>
+                        </button>
+                      )}
+                   </div>
+                </div>
+
+                {selectedPlatforms.length > 1 && (
+                   <div className="space-y-3 bg-gray-900/30 p-4 rounded-xl border border-gray-800">
+                      <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                         <Layers size={14} /> Detalhamento por App
+                      </h4>
+                      {selectedPlatforms.map(pId => {
+                         const pInfo = ALL_PLATFORMS.find(p => p.id === pId) || ALL_PLATFORMS[5];
+                         return (
+                            <div key={pId} className="flex flex-col sm:flex-row gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
+                               <div className="flex items-center gap-3 w-full sm:w-auto">
+                                  <div className="w-8 h-8 rounded-lg bg-white p-0.5 flex items-center justify-center">
+                                     {pInfo.logo ? <img src={pInfo.logo} className="w-full h-full object-contain"/> : pInfo.icon}
                                   </div>
-                                  <div className="text-left">
-                                     <div className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>{v.name}</div>
-                                     <div className="text-[10px] text-gray-500 uppercase">{v.brand} • {v.licensePlate}</div>
+                                  <span className="text-white font-bold text-sm w-20">{pInfo.label}</span>
+                               </div>
+                               
+                               <div className="flex gap-2 w-full">
+                                  <div className="relative flex-1">
+                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
+                                     <input 
+                                        type="number" step="0.01" placeholder="0.00"
+                                        value={splitData[pId]?.amount || ""}
+                                        onChange={(e) => updateSplitData(pId, 'amount', e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-8 pr-2 text-white text-sm focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                     />
+                                  </div>
+                                  <div className="relative w-24">
+                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-[10px] uppercase">Trips</span>
+                                     <input 
+                                        type="number" placeholder="0"
+                                        value={splitData[pId]?.trips || ""}
+                                        onChange={(e) => updateSplitData(pId, 'trips', e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-3 pr-10 text-white text-sm focus:border-purple-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                     />
                                   </div>
                                </div>
-                               {isSelected && (
-                                 <div className="flex items-center gap-1 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-lg shadow-emerald-500/20">
-                                    <Check size={10} /> Ativo
-                                 </div>
-                               )}
-                            </button>
-                          )
-                       })}
-                    </div>
-                  )}
-               </div>
-            </div>
+                            </div>
+                         )
+                      })}
+                   </div>
+                )}
 
-            <div>
-               <label className="text-gray-400 text-xs font-bold uppercase mb-3 block tracking-wider">
-                 Plataforma(s) {selectedPlatforms.length > 0 && <span className="text-emerald-500 ml-1">({selectedPlatforms.length})</span>}
-               </label>
-               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                  {displayedPlatforms.map((p) => {
-                     const isSelected = selectedPlatforms.includes(p.id);
-                     return (
-                       <button
-                         key={p.id}
-                         type="button"
-                         onClick={() => togglePlatform(p.id as Platform)}
-                         className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 cursor-pointer ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
-                       >
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
-                            {p.logo ? <img src={p.logo} alt={p.label} className="w-full h-full object-cover" /> : p.icon}
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 md:p-6 shadow-xl relative overflow-hidden">
+                   <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                      <div className="col-span-1 md:col-span-2">
+                          <label className="text-emerald-400 text-xs font-bold uppercase mb-2 block tracking-wider">
+                             {selectedPlatforms.length > 1 ? "Valor Total (Calculado)" : "Valor Total (R$)"}
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-xl md:text-2xl">R$</span>
+                            <input 
+                              type="number" step="0.01" required inputMode="decimal" min="0"
+                              readOnly={selectedPlatforms.length > 1}
+                              value={amount} onChange={e => setAmount(e.target.value)} 
+                              onKeyDown={preventNegativeInput}
+                              className={`w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 cursor-not-allowed text-emerald-200' : ''}`}
+                              placeholder="0,00" 
+                            />
                           </div>
-                          <span className="font-bold text-sm tracking-tight">{p.label}</span>
-                          {isSelected && <CheckCircle2 size={18} className="absolute top-2 right-2 text-white drop-shadow-md" />}
-                       </button>
-                     )
-                  })}
-                  {!showAllPlatforms && (
-                    <button type="button" onClick={() => setShowAllPlatforms(true)} className="h-28 rounded-2xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex flex-col items-center justify-center gap-2 group active:scale-95 cursor-pointer">
-                      <div className="w-10 h-10 rounded-xl bg-gray-800 flex items-center justify-center group-hover:bg-gray-700"><LayoutGrid size={20} /></div>
-                      <span className="font-bold text-sm">Ver Mais</span>
-                    </button>
-                  )}
-                  {showAllPlatforms && (
-                    <button type="button" onClick={() => setShowAllPlatforms(false)} className="h-28 rounded-2xl border border-dashed border-gray-700 bg-transparent text-gray-500 hover:text-white hover:border-gray-500 transition-all flex flex-col items-center justify-center gap-1 active:scale-95 cursor-pointer">
-                      <ChevronUp size={24} /><span className="text-xs font-medium">Recolher</span>
-                    </button>
-                  )}
-               </div>
-            </div>
-
-            {selectedPlatforms.length > 1 && (
-               <div className="space-y-3 bg-gray-900/30 p-4 rounded-xl border border-gray-800">
-                  <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                     <Layers size={14} /> Detalhamento por App
-                  </h4>
-                  {selectedPlatforms.map(pId => {
-                     const pInfo = ALL_PLATFORMS.find(p => p.id === pId) || ALL_PLATFORMS[5];
-                     return (
-                        <div key={pId} className="flex flex-col sm:flex-row gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
-                           <div className="flex items-center gap-3 w-full sm:w-auto">
-                              <div className="w-8 h-8 rounded-lg bg-white p-0.5 flex items-center justify-center">
-                                 {pInfo.logo ? <img src={pInfo.logo} className="w-full h-full object-contain"/> : pInfo.icon}
-                              </div>
-                              <span className="text-white font-bold text-sm w-20">{pInfo.label}</span>
-                           </div>
-                           
-                           <div className="flex gap-2 w-full">
-                              <div className="relative flex-1">
-                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
-                                 <input 
-                                    type="number" step="0.01" placeholder="0.00"
-                                    value={splitData[pId]?.amount || ""}
-                                    onChange={(e) => updateSplitData(pId, 'amount', e.target.value)}
-                                    className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-8 pr-2 text-white text-sm focus:border-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                 />
-                              </div>
-                              <div className="relative w-24">
-                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-[10px] uppercase">Trips</span>
-                                 <input 
-                                    type="number" placeholder="0"
-                                    value={splitData[pId]?.trips || ""}
-                                    onChange={(e) => updateSplitData(pId, 'trips', e.target.value)}
-                                    className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-3 pr-10 text-white text-sm focus:border-purple-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                 />
-                              </div>
-                           </div>
-                        </div>
-                     )
-                  })}
-               </div>
-            )}
-
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 md:p-6 shadow-xl relative overflow-hidden">
-               <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                  <div className="col-span-1 md:col-span-2">
-                      <label className="text-emerald-400 text-xs font-bold uppercase mb-2 block tracking-wider">
-                         {selectedPlatforms.length > 1 ? "Valor Total (Calculado)" : "Valor Total (R$)"}
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-xl md:text-2xl">R$</span>
-                        <input 
-                          type="number" step="0.01" required inputMode="decimal" min="0"
-                          readOnly={selectedPlatforms.length > 1}
-                          value={amount} onChange={e => setAmount(e.target.value)} 
-                          onKeyDown={preventNegativeInput}
-                          className={`w-full bg-gray-950 border border-emerald-500/30 rounded-xl py-4 pl-12 md:pl-14 text-white text-2xl md:text-3xl font-bold focus:ring-2 focus:ring-emerald-500 outline-none placeholder-emerald-900/30 h-16 md:h-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 cursor-not-allowed text-emerald-200' : ''}`}
-                          placeholder="0,00" 
-                        />
                       </div>
-                  </div>
-                  <div>
-                      <label className="text-gray-500 text-xs font-bold uppercase mb-2 block tracking-wider">Data</label>
-                      <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 md:p-4 text-white focus:border-emerald-500 outline-none h-12 md:h-14"/>
-                  </div>
-               </div>
-            </div>
-
-            {goalsForThisVehicle.length > 0 && (
-                <div className="bg-gradient-to-br from-purple-900/20 to-gray-900 border border-purple-500/20 p-4 rounded-xl shadow-lg">
-                   <div className="flex items-center gap-2 mb-3">
-                       <Target size={18} className="text-purple-400" />
-                       <span className="text-purple-100 font-bold text-sm">Destinar Lucro para Meta (Opcional)</span>
+                      <div>
+                          <label className="text-gray-500 text-xs font-bold uppercase mb-2 block tracking-wider">Data</label>
+                          <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 md:p-4 text-white focus:border-emerald-500 outline-none h-12 md:h-14"/>
+                      </div>
                    </div>
-                   
-                   <div className="relative">
-                      <select 
-                        value={targetGoalId} 
-                        onChange={e => setTargetGoalId(e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 outline-none focus:border-purple-500 appearance-none cursor-pointer"
-                      >
-                          <option value="">-- Não destinar --</option>
-                          {goalsForThisVehicle.map(g => (
-                              <option key={g.id} value={g.id}>
-                                 {g.title} (Faltam {formatMoneyFloat(g.targetAmount - g.currentAmount)})
-                              </option>
-                          ))}
-                      </select>
-                      <ChevronUp className="absolute right-3 top-1/2 -translate-y-1/2 rotate-180 text-gray-500 pointer-events-none" size={16} />
-                   </div>
-                   
-                   {targetGoalId && estimatedProfit > 0 && (
-                       <div className="mt-3 text-xs text-purple-300 flex items-center gap-1 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
-                           <CheckCircle2 size={12} />
-                           Serão adicionados <b>{estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</b> à meta selecionada.
-                       </div>
-                   )}
                 </div>
-            )}
 
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-               
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados (Trip)</label>
-                   <div className="flex items-center gap-1.5">
-                      <Map size={14} className="text-blue-500 shrink-0" />
-                      <input 
-                        type="number" inputMode="numeric" min="0"
-                        value={distance} onChange={e => setDistance(e.target.value)} 
-                        onKeyDown={preventNegativeInput}
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-blue-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                        placeholder="0" 
-                      />
+                {goalsForThisVehicle.length > 0 && (
+                    <div className="bg-gradient-to-br from-purple-900/20 to-gray-900 border border-purple-500/20 p-4 rounded-xl shadow-lg">
+                       <div className="flex items-center gap-2 mb-3">
+                           <Target size={18} className="text-purple-400" />
+                           <span className="text-purple-100 font-bold text-sm">Destinar Lucro para Meta (Opcional)</span>
+                       </div>
+                       
+                       <div className="relative">
+                          <select 
+                            value={targetGoalId} 
+                            onChange={e => setTargetGoalId(e.target.value)}
+                            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 outline-none focus:border-purple-500 appearance-none cursor-pointer"
+                          >
+                              <option value="">-- Não destinar --</option>
+                              {goalsForThisVehicle.map(g => (
+                                  <option key={g.id} value={g.id}>
+                                     {g.title} (Faltam {formatMoneyFloat(g.targetAmount - g.currentAmount)})
+                                  </option>
+                              ))}
+                          </select>
+                          <ChevronUp className="absolute right-3 top-1/2 -translate-y-1/2 rotate-180 text-gray-500 pointer-events-none" size={16} />
+                       </div>
+                       
+                       {targetGoalId && estimatedProfit > 0 && (
+                           <div className="mt-3 text-xs text-purple-300 flex items-center gap-1 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
+                               <CheckCircle2 size={12} />
+                               Serão adicionados <b>{estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</b> à meta selecionada.
+                           </div>
+                       )}
+                    </div>
+                )}
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                   
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados (Trip)</label>
+                       <div className="flex items-center gap-1.5">
+                          <Map size={14} className="text-blue-500 shrink-0" />
+                          <input 
+                            type="number" inputMode="numeric" min="0"
+                            value={distance} onChange={e => setDistance(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-blue-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                            placeholder="0" 
+                          />
+                       </div>
                    </div>
-               </div>
 
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
-                   <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-500 blur-md opacity-20"></div>
-                   <label className="text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Odômetro Final</label>
-                   <div className="flex items-center gap-1.5">
-                      <Navigation size={14} className="text-emerald-500 shrink-0" />
-                      <input 
-                        type="number" inputMode="numeric" min="0"
-                        value={odometerInput} onChange={e => setOdometerInput(e.target.value)} 
-                        onKeyDown={preventNegativeInput}
-                        className="w-full bg-transparent text-emerald-100 font-bold outline-none border-b border-emerald-500/50 focus:border-emerald-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                        placeholder="Total" 
-                      />
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
+                       <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-500 blur-md opacity-20"></div>
+                       <label className="text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Odômetro Final</label>
+                       <div className="flex items-center gap-1.5">
+                          <Navigation size={14} className="text-emerald-500 shrink-0" />
+                          <input 
+                            type="number" inputMode="numeric" min="0"
+                            value={odometerInput} onChange={e => setOdometerInput(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className="w-full bg-transparent text-emerald-100 font-bold outline-none border-b border-emerald-500/50 focus:border-emerald-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                            placeholder="Total" 
+                          />
+                       </div>
                    </div>
-               </div>
 
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
-                   <div className="flex items-center gap-1.5">
-                      <Gauge size={14} className="text-orange-500 shrink-0" />
-                      <input 
-                        type="number" step="0.1" inputMode="decimal" min="0"
-                        value={clusterAvg} onChange={e => setClusterAvg(e.target.value)} 
-                        onKeyDown={preventNegativeInput}
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-orange-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                        placeholder="km/l" 
-                      />
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
+                       <div className="flex items-center gap-1.5">
+                          <Gauge size={14} className="text-orange-500 shrink-0" />
+                          <input 
+                            type="number" step="0.1" inputMode="decimal" min="0"
+                            value={clusterAvg} onChange={e => setClusterAvg(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-orange-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                            placeholder="km/l" 
+                          />
+                       </div>
                    </div>
-               </div>
 
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
-                   <div className="flex items-center gap-1.5">
-                      <Clock size={14} className="text-yellow-500 shrink-0" />
-                      <input 
-                        type="number" step="0.1" inputMode="decimal" min="0"
-                        value={hours} onChange={e => setHours(e.target.value)} 
-                        onKeyDown={preventNegativeInput}
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-yellow-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                        placeholder="0.0" 
-                      />
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
+                       <div className="flex items-center gap-1.5">
+                          <Clock size={14} className="text-yellow-500 shrink-0" />
+                          <input 
+                            type="number" step="0.1" inputMode="decimal" min="0"
+                            value={hours} onChange={e => setHours(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-yellow-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                            placeholder="0.0" 
+                          />
+                       </div>
                    </div>
-               </div>
 
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">
-                     {selectedPlatforms.length > 1 ? "Viagens (Total)" : "Viagens"}
-                   </label>
-                   <div className="flex items-center gap-1.5">
-                      <Briefcase size={14} className="text-purple-500 shrink-0" />
-                      <input 
-                        type="number" inputMode="numeric" min="0"
-                        readOnly={selectedPlatforms.length > 1}
-                        value={trips} onChange={e => setTrips(e.target.value)} 
-                        onKeyDown={preventNegativeInput}
-                        className={`w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 text-purple-200 cursor-not-allowed' : ''}`}
-                        placeholder="0" 
-                      />
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">
+                         {selectedPlatforms.length > 1 ? "Viagens (Total)" : "Viagens"}
+                       </label>
+                       <div className="flex items-center gap-1.5">
+                          <Briefcase size={14} className="text-purple-500 shrink-0" />
+                          <input 
+                            type="number" inputMode="numeric" min="0"
+                            readOnly={selectedPlatforms.length > 1}
+                            value={trips} onChange={e => setTrips(e.target.value)} 
+                            onKeyDown={preventNegativeInput}
+                            className={`w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-purple-500 pb-0.5 text-sm md:text-base [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedPlatforms.length > 1 ? 'opacity-80 text-purple-200 cursor-not-allowed' : ''}`}
+                            placeholder="0" 
+                          />
+                       </div>
                    </div>
-               </div>
 
-               <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                   <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Observação</label>
-                   <div className="flex items-center gap-1.5">
-                      <FileText size={14} className="text-gray-400 shrink-0" />
-                      <input 
-                        type="text"
-                        value={description} onChange={e => setDescription(e.target.value)} 
-                        className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-gray-400 pb-0.5 text-sm md:text-base" 
-                        placeholder="Ex: Chuva" 
-                      />
+                   <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Observação</label>
+                       <div className="flex items-center gap-1.5">
+                          <FileText size={14} className="text-gray-400 shrink-0" />
+                          <input 
+                            type="text"
+                            value={description} onChange={e => setDescription(e.target.value)} 
+                            className="w-full bg-transparent text-white font-bold outline-none border-b border-gray-700 focus:border-gray-400 pb-0.5 text-sm md:text-base" 
+                            placeholder="Ex: Chuva" 
+                          />
+                       </div>
                    </div>
-               </div>
-            </div>
+                </div>
 
-            {(tripKm > 0 && panelAvg > 0) && (
-              <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
-                <div className="flex items-center gap-2 mb-3">
-                    <h4 className="text-gray-400 text-xs font-bold uppercase flex items-center gap-2">
-                        <Zap size={14} className="text-yellow-500"/> Análise da Trip (Estimada)
-                    </h4>
-                    <div className="relative group">
-                        <Info size={14} className="text-gray-500 cursor-help" />
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 border border-gray-700 rounded-lg text-[10px] text-gray-300 text-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50">
-                             Estimativa baseada na Trip e média do painel. A média real (bomba) está no Dashboard.
-                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-700"></div>
+                {(tripKm > 0 && panelAvg > 0) && (
+                  <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2 mb-3">
+                        <h4 className="text-gray-400 text-xs font-bold uppercase flex items-center gap-2">
+                            <Zap size={14} className="text-yellow-500"/> Análise da Trip (Estimada)
+                        </h4>
+                        <div className="relative group">
+                            <Info size={14} className="text-gray-500 cursor-help" />
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 border border-gray-700 rounded-lg text-[10px] text-gray-300 text-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50">
+                                 Estimativa baseada na Trip e média do painel. A média real (bomba) está no Dashboard.
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-700"></div>
+                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 text-center divide-x divide-gray-700">
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase">Custo Comb.</p>
-                    <p className="text-red-400 font-bold text-lg">
-                       {estimatedCost.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                    </p>
-                    {lastFuelPrice > 0 ? (
-                        <p className="text-[9px] text-gray-600">Base: R${lastFuelPrice.toFixed(2)}/un</p>
-                    ) : (
-                        <p className="text-[9px] text-yellow-600">Sem ref. de preço</p>
-                    )}
-                  </div>
+                    
+                    <div className="grid grid-cols-3 gap-4 text-center divide-x divide-gray-700">
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Custo Comb.</p>
+                        <p className="text-red-400 font-bold text-lg">
+                           {estimatedCost.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                        </p>
+                        {lastFuelPrice > 0 ? (
+                            <p className="text-[9px] text-gray-600">Base: R${lastFuelPrice.toFixed(2)}/un</p>
+                        ) : (
+                            <p className="text-[9px] text-yellow-600">Sem ref. de preço</p>
+                        )}
+                      </div>
 
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase">Lucro Líquido</p>
-                    <p className={`font-bold text-lg ${estimatedProfit > 0 ? 'text-emerald-400' : 'text-red-500'}`}>
-                       {estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                    </p>
-                  </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Lucro Líquido</p>
+                        <p className={`font-bold text-lg ${estimatedProfit > 0 ? 'text-emerald-400' : 'text-red-500'}`}>
+                           {estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                        </p>
+                      </div>
 
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase">Custo/KM</p>
-                    <p className="text-yellow-500 font-bold text-lg">
-                       {((estimatedCost / tripKm) || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                    </p>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase">Custo/KM</p>
+                        <p className="text-yellow-500 font-bold text-lg">
+                           {((estimatedCost / tripKm) || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
+                )}
 
-            <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-base md:text-lg h-14 md:h-16 cursor-pointer">
-              {saving ? "Salvando..." : <><DollarSign size={20} /> Confirmar Lançamento</>}
-            </button>
-          </form>
+                <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-base md:text-lg h-14 md:h-16 cursor-pointer">
+                  {saving ? "Salvando..." : <><DollarSign size={20} /> Confirmar Lançamento</>}
+                </button>
+              </form>
+
+          </div>
         </div>
 
         <div className="flex-1 w-full md:border-l md:border-gray-800 md:pl-8">
