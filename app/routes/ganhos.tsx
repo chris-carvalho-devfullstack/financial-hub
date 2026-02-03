@@ -10,20 +10,31 @@ import {
   Info, Target, Layers
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client"; 
-import { Platform } from "~/types/enums";
+import { Platform } from "~/types/enums"; 
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
 import type { User } from "@supabase/supabase-js";
 
-// === ESTILOS CSS PARA SCROLLBAR MODERNA ===
+// === ESTILOS CSS PARA SCROLLBAR MODERNA E ANIMAÇÃO SHIMMER ===
 const SCROLLBAR_STYLES = `
   .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
   .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+
+  /* Animação de Shimmer para Skeleton */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .animate-shimmer {
+    background: linear-gradient(90deg, rgba(31, 41, 55, 0.5) 25%, rgba(55, 65, 81, 0.5) 50%, rgba(31, 41, 55, 0.5) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
 `;
 
-// === TIPO LOCAL PARA SUPORTAR O SPLIT ===
+// === TIPO LOCAL PARA SUPORTAR O SPLIT E CORRIGIR ERRO TS ===
 interface IncomeTransactionWithSplit extends IncomeTransaction {
   split?: {
     platform: Platform;
@@ -31,6 +42,7 @@ interface IncomeTransactionWithSplit extends IncomeTransaction {
     trips?: number;
   }[];
   notes?: string; // Fallback para compatibilidade
+  category?: string; // Adicionado para compatibilidade
 }
 
 // === CONFIGURAÇÃO DAS PLATAFORMAS ===
@@ -89,7 +101,50 @@ const MULTIPLE_PLATFORM_CONFIG = {
   textColor: 'text-white'
 };
 
+// === HELPER: MAPPER UNIFICADO ===
+// Garante que dados do Select e do Realtime (Payload) tenham o mesmo formato
+const mapTransactionFromDB = (t: any): IncomeTransactionWithSplit => ({
+    id: t.id,
+    amount: t.amount,
+    date: t.date,
+    type: t.type,
+    platform: t.platform,
+    category: t.category || 'INCOME',
+    description: t.description || t.notes || "",
+    userId: t.user_id,
+    vehicleId: t.vehicle_id,
+    
+    // Mapeamento robusto para lidar com variações de nome de coluna (snake_case do DB para camelCase da App)
+    distanceDriven: Number(t.distance_driven ?? t.distance ?? 0),
+    onlineDurationMinutes: Number(t.online_duration_minutes ?? t.duration ?? 0),
+    tripsCount: Number(t.trips_count ?? t.trip_count ?? 0),
+    clusterKmPerLiter: Number(t.cluster_km_per_liter ?? 0),
+    odometer: Number(t.odometer ?? 0),
+    linkedGoalId: t.linked_goal_id,
+    
+    notes: t.notes || t.description || "",
+    split: t.split,
+    createdAt: t.created_at,
+    updatedAt: t.updated_at
+});
+
 // === COMPONENTES AUXILIARES ===
+
+// --- SKELETON LOADER PARA A LISTA ---
+function TransactionSkeleton() {
+  return (
+    <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl mb-3 flex items-center justify-between">
+       <div className="flex items-center gap-3 w-full">
+          <div className="w-10 h-10 rounded-xl animate-shimmer flex-shrink-0"></div>
+          <div className="space-y-2 w-full max-w-[150px]">
+             <div className="h-3 w-3/4 rounded animate-shimmer"></div>
+             <div className="h-2 w-1/2 rounded animate-shimmer"></div>
+          </div>
+       </div>
+       <div className="h-4 w-20 rounded animate-shimmer"></div>
+    </div>
+  );
+}
 
 // --- COMPONENTE DE FEEDBACK ---
 function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: any) {
@@ -228,12 +283,11 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
         date: new Date(`${formData.date}T00:00:00`).toISOString(),
-        distance_driven: Number(formData.distanceDriven), 
+        distance: Number(formData.distanceDriven), 
         odometer: Number(formData.odometer),
         cluster_km_per_liter: Number(formData.clusterKmPerLiter), 
-        online_duration_minutes: Math.round(Number(formData.onlineDurationMinutes) * 60), 
-        trips_count: Number(formData.tripsCount), 
-        description: formData.description,
+        duration: Math.round(Number(formData.onlineDurationMinutes) * 60), 
+        trip_count: Number(formData.tripsCount), 
         notes: formData.description
       };
 
@@ -478,8 +532,11 @@ export default function GanhosPage() {
   const [user, setUser] = useState<User | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [activeGoals, setActiveGoals] = useState<Goal[]>([]);
+  
+  // Realtime State Otimizado
   const [recentGains, setRecentGains] = useState<IncomeTransactionWithSplit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(true); // Loading apenas inicial
+  
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
@@ -506,12 +563,14 @@ export default function GanhosPage() {
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
+  // 1. Auth Init
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
         if (data.user) setUser(data.user);
     });
   }, []);
 
+  // 2. Cálculo do Split Automático
   useEffect(() => {
     if (selectedPlatforms.length > 1) {
       let totalAmount = 0;
@@ -550,6 +609,7 @@ export default function GanhosPage() {
     }));
   };
 
+  // 3. Carregar Veículos (Realtime)
   const fetchVehiclesAndPref = useCallback(async () => {
     if (!user) return;
     const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
@@ -588,6 +648,7 @@ export default function GanhosPage() {
    }
  }, [user, fetchVehiclesAndPref]);
 
+  // 4. Carregar Metas (Realtime)
   const fetchGoals = useCallback(async () => {
       if (!user) return;
       const { data, error } = await supabase.from('goals').select('*').eq('user_id', user.id).eq('status', 'ACTIVE');
@@ -613,55 +674,65 @@ export default function GanhosPage() {
     }
   }, [user, fetchGoals]);
 
-  const fetchRecentGains = useCallback(async () => {
+  // === 5. CORE REALTIME LOGIC PARA TRANSAÇÕES (Otimizado com State Management Reativo) ===
+  // Lógica: Carga inicial + Manipulação direta do estado via Socket
+  useEffect(() => {
     if (!user || !selectedVehicle) return;
-    setLoading(true);
 
-    const { data, error } = await supabase
-       .from('transactions')
-       .select('*')
-       .eq('user_id', user.id)
-       .eq('vehicle_id', selectedVehicle)
-       .eq('type', 'INCOME')
-       .order('date', { ascending: false })
-       .limit(10);
+    // Apenas na primeira vez mostramos o skeleton
+    setIsLoadingInitial(true);
 
-    if (!error && data) {
-       const mapped = data.map(t => ({
-           ...t,
-           userId: t.user_id,
-           vehicleId: t.vehicle_id,
-           // Mapping para garantir compatibilidade com colunas do DB
-           // DB (snake_case) -> App (camelCase)
-           distanceDriven: t.distance_driven || t.distance || 0,
-           onlineDurationMinutes: t.online_duration_minutes || t.duration || 0,
-           tripsCount: t.trips_count || t.trip_count || 0,
-           clusterKmPerLiter: t.cluster_km_per_liter,
-           linkedGoalId: t.linked_goal_id,
-           // Se 'notes' existir no banco, jogamos para 'description' e 'notes'
-           description: t.description || t.notes || "",
-           notes: t.notes || t.description || "" // Fallback
-       }));
-       setRecentGains(mapped as any);
-    }
-    setLoading(false);
- }, [user, selectedVehicle]);
+    const loadInitialData = async () => {
+        const { data, error } = await supabase
+           .from('transactions')
+           .select('*')
+           .eq('user_id', user.id)
+           .eq('vehicle_id', selectedVehicle)
+           .eq('type', 'INCOME')
+           .order('date', { ascending: false })
+           .limit(10);
+        
+        if (!error && data) {
+           setRecentGains(data.map(mapTransactionFromDB));
+        }
+        setIsLoadingInitial(false);
+    };
 
- useEffect(() => {
-   if (user && selectedVehicle) {
-       fetchRecentGains();
-       const channel = supabase.channel(`realtime-gains-${selectedVehicle}`)
-           .on('postgres_changes', 
-               { event: '*', schema: 'public', table: 'transactions', filter: `vehicle_id=eq.${selectedVehicle}` }, 
-               () => fetchRecentGains() 
-           )
-           .subscribe();
+    loadInitialData();
 
-       return () => { supabase.removeChannel(channel); }
-   }
- }, [user, selectedVehicle, fetchRecentGains]);
+    // Inscrição Realtime "Cirúrgica"
+    const channel = supabase.channel(`realtime-gains-${selectedVehicle}`)
+       .on(
+         'postgres_changes', 
+         { event: '*', schema: 'public', table: 'transactions', filter: `vehicle_id=eq.${selectedVehicle}` }, 
+         (payload) => {
+             // 1. INSERT: Adiciona no topo se for INCOME
+             if (payload.eventType === 'INSERT' && payload.new.type === 'INCOME') {
+                 const newTx = mapTransactionFromDB(payload.new);
+                 setRecentGains(prev => {
+                     // DEDUPLICAÇÃO: Se já adicionamos manualmente no handleSave, não adiciona de novo
+                     if (prev.some(item => item.id === newTx.id)) return prev;
+                     return [newTx, ...prev];
+                 });
+             } 
+             // 2. DELETE: Remove da lista
+             else if (payload.eventType === 'DELETE') {
+                 setRecentGains(prev => prev.filter(item => item.id !== payload.old.id));
+             }
+             // 3. UPDATE: Atualiza o item na lista
+             else if (payload.eventType === 'UPDATE' && payload.new.type === 'INCOME') {
+                 setRecentGains(prev => prev.map(item => item.id === payload.new.id ? mapTransactionFromDB(payload.new) : item));
+             }
+         }
+       )
+       .subscribe();
+
+    return () => { supabase.removeChannel(channel); }
+
+  }, [user, selectedVehicle]);
 
 
+  // 6. Lógica Auxiliar
   useEffect(() => {
     if (!selectedVehicle) return;
     
@@ -768,25 +839,45 @@ export default function GanhosPage() {
         linked_goal_id: targetGoalId || null
       };
 
-      
-      const { error: txError } = await supabase.from('transactions').insert(transactionData);
-      if (txError) throw txError; // <--- Isso vai travar e mostrar o erro real no console
+      // MELHORIA DE FLUIDEZ: Inserir e selecionar o dado retornado na mesma chamada
+      const { data: insertedData, error: txError } = await supabase
+          .from('transactions')
+          .insert(transactionData)
+          .select()
+          .single();
+
+      if (txError) throw txError;
+
+      // ATUALIZAÇÃO OTIMISTA: Atualiza o estado imediatamente com o dado retornado
+      if (insertedData) {
+          const newTransaction = mapTransactionFromDB(insertedData);
+          setRecentGains(prev => [newTransaction, ...prev]);
+      }
+
+      // Atualizações paralelas (não bloqueiam o fluxo principal visual - Fire and Forget)
+      const promises = [];
 
       if (finalOdometer > startOdometer) {
-         await supabase.from('vehicles').update({
+         promises.push(supabase.from('vehicles').update({
             current_odometer: finalOdometer,
             last_odometer_date: new Date(`${date}T12:00:00`).toISOString(),
             updated_at: new Date().toISOString()
-         }).eq('id', selectedVehicle);
+         }).eq('id', selectedVehicle));
       }
 
       if (targetGoalId && estimatedProfit > 0) {
-          const { data: goal } = await supabase.from('goals').select('current_amount').eq('id', targetGoalId).single();
+          const goal = activeGoals.find(g => g.id === targetGoalId);
           if (goal) {
-              await supabase.from('goals').update({
-                  current_amount: goal.current_amount + estimatedProfit
-              }).eq('id', targetGoalId);
+              promises.push(supabase.from('goals').update({
+                  current_amount: goal.currentAmount + estimatedProfit
+              }).eq('id', targetGoalId));
           }
+      }
+      
+      // Executa as promessas secundárias em segundo plano
+      Promise.all(promises).catch(console.error);
+
+      if (targetGoalId && estimatedProfit > 0) {
           setFeedback({
             isOpen: true,
             type: 'success',
@@ -802,6 +893,7 @@ export default function GanhosPage() {
         });
       }
 
+      // Limpa formulário
       setAmount("");
       setDistance("");
       setOdometerInput(""); 
@@ -1211,10 +1303,12 @@ export default function GanhosPage() {
            <div className="mt-8 md:mt-[112px]">
               <div className="flex items-center justify-between mb-4">
                  <h3 className="text-gray-400 font-bold uppercase text-sm flex items-center gap-2"><History size={16} /> Histórico Recente</h3>
-                 {recentGains.length > 0 && <span className="text-[10px] text-gray-500 bg-gray-900 px-2 py-1 rounded border border-gray-800 font-mono">{recentGains.length} últimos</span>}
+                 {!isLoadingInitial && recentGains.length > 0 && <span className="text-[10px] text-gray-500 bg-gray-900 px-2 py-1 rounded border border-gray-800 font-mono">{recentGains.length} últimos</span>}
               </div>
 
-              {!loading && recentGains.map(gain => {
+              {isLoadingInitial && Array.from({length: 5}).map((_, i) => <TransactionSkeleton key={i} />)}
+
+              {!isLoadingInitial && recentGains.map(gain => {
                   const platformInfo = getPlatformDetails(gain.platform);
                   const isDeleting = deletingId === gain.id;
                   const isMultiple = gain.platform === 'MULTIPLE';
