@@ -4,11 +4,34 @@ import { useEffect, useState } from "react";
 import { 
   Car, Plus, Trash2, Gauge, Calendar, AlertTriangle, 
   Pencil, Save, X, Bike, Truck, Info, 
-  Fuel, Flame, Zap, PenTool
+  Fuel, Flame, Zap, PenTool, CheckCircle, FileText
 } from "lucide-react";
-import { supabase } from "~/lib/supabase.client"; // ✅ Cliente Supabase
+import { supabase } from "~/lib/supabase.client"; 
 import { VehicleType, TankType, FuelType } from "~/types/enums";
 import type { Vehicle, VehicleTank } from "~/types/models";
+
+// === ESTILOS CSS PARA SCROLLBAR MODERNA ===
+const SCROLLBAR_STYLES = `
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #374151; /* gray-700 */
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #4b5563; /* gray-600 */
+  }
+  /* Firefox */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #374151 transparent;
+  }
+`;
 
 // === LISTA DE MARCAS ===
 const BRAND_LIST = [
@@ -86,6 +109,36 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
+function FeedbackModal({ isOpen, onClose, title, message, type = 'error' }: any) {
+  if (!isOpen) return null;
+  const isSuccess = type === 'success';
+  const Icon = isSuccess ? CheckCircle : AlertTriangle;
+  const iconColor = isSuccess ? "text-emerald-500" : "text-red-500";
+  const bgIcon = isSuccess ? "bg-emerald-500/10" : "bg-red-500/10";
+  const btnColor = isSuccess ? "bg-emerald-600 hover:bg-emerald-500" : "bg-red-600 hover:bg-red-500";
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-default animate-in fade-in duration-200">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="flex items-start gap-4">
+          <div className={`${bgIcon} p-3 rounded-full`}>
+            <Icon className={iconColor} size={24} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">{title}</h3>
+            <p className="text-gray-400 text-sm mt-1">{message}</p>
+          </div>
+        </div>
+        <div className="mt-6">
+          <button onClick={onClose} className={`w-full ${btnColor} text-white py-2 rounded-lg font-medium transition-colors cursor-pointer`}>
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VehicleDetailsModal({ isOpen, onClose, vehicle, onEdit, onDelete }: any) {
     if (!isOpen || !vehicle) return null;
 
@@ -93,11 +146,7 @@ function VehicleDetailsModal({ isOpen, onClose, vehicle, onEdit, onDelete }: any
     const v = vehicle as Vehicle & { lastOdometerDate?: string };
     const brandSlug = BRAND_LIST.find(b => b.name.toLowerCase() === (v.brand || "").toLowerCase())?.slug;
 
-    // LÓGICA DE DATA: Prioriza a data específica da leitura do odômetro
-    // Se não existir, usa createdAt (fallback do banco)
     const displayDate = v.lastOdometerDate || v.createdAt;
-
-    // Formata a data ajustando o fuso horário para exibir corretamente
     const formattedDate = displayDate 
         ? new Date(displayDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) 
         : "--/--/----";
@@ -218,6 +267,12 @@ function VehicleDetailsModal({ isOpen, onClose, vehicle, onEdit, onDelete }: any
                                 <span className="text-xs text-gray-300 font-mono tracking-wider">{v.renavam}</span>
                             </div>
                         )}
+                        {v.notes && (
+                             <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700/50 flex flex-col col-span-2">
+                                <span className="text-[10px] text-gray-500 uppercase font-bold mb-1 flex items-center gap-1"><FileText size={10}/> Observações</span>
+                                <span className="text-xs text-gray-300 whitespace-pre-wrap">{v.notes}</span>
+                            </div>
+                        )}
                     </div>
 
                     {/* ODÔMETRO */}
@@ -271,7 +326,7 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
     const [year, setYear] = useState("");
     const [plate, setPlate] = useState("");
     const [odometer, setOdometer] = useState("");
-    const [odometerDate, setOdometerDate] = useState(""); // Campo separado para a data do odômetro
+    const [odometerDate, setOdometerDate] = useState(""); 
     
     // Avançados
     const [vin, setVin] = useState("");
@@ -282,20 +337,21 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
         { type: TankType.LIQUID, fuelTypes: [FuelType.GASOLINE, FuelType.ETHANOL], capacity: 50, unit: 'L' }
     ]);
     const [saving, setSaving] = useState(false);
+    
+    const [formFeedback, setFormFeedback] = useState({ isOpen: false, title: '', message: '' });
 
     useEffect(() => {
         if (vehicleToEdit) {
             const v = vehicleToEdit as any;
-            setName(v.name);
+            setName(v.name || "");
             setType(v.type);
-            setBrand(v.brand);
+            setBrand(v.brand || "");
             setIsCustomBrand(!BRAND_LIST.some(b => b.name === v.brand));
-            setModel(v.model);
-            setYear(String(v.year));
-            setPlate(v.licensePlate);
-            setOdometer(String(v.currentOdometer));
+            setModel(v.model || "");
+            setYear(String(v.year || ""));
+            setPlate(v.licensePlate || "");
+            setOdometer(String(v.currentOdometer || ""));
             
-            // LÓGICA DE PREENCHIMENTO DA DATA NO INPUT
             const refDate = v.lastOdometerDate ? new Date(v.lastOdometerDate) : (v.updatedAt ? new Date(v.updatedAt) : new Date());
             setOdometerDate(refDate.toISOString().split('T')[0]);
 
@@ -313,7 +369,7 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
             setYear("");
             setPlate("");
             setOdometer("");
-            setOdometerDate(new Date().toISOString().split('T')[0]); // Padrão: Hoje
+            setOdometerDate(new Date().toISOString().split('T')[0]); 
             setVin("");
             setRenavam("");
             setNotes("");
@@ -324,10 +380,15 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
     if (!isOpen) return null;
 
     const addTank = () => setTanks([...tanks, { type: TankType.PRESSURIZED, fuelTypes: [FuelType.CNG], capacity: 15, unit: 'm3' }]);
+    
     const removeTank = (idx: number) => {
-        if (tanks.length === 1) return alert("O veículo precisa de pelo menos 1 fonte de energia.");
+        if (tanks.length === 1) {
+            setFormFeedback({ isOpen: true, title: "Atenção", message: "O veículo precisa de pelo menos 1 fonte de energia." });
+            return;
+        }
         setTanks(tanks.filter((_, i) => i !== idx));
     };
+
     const updateTank = (idx: number, field: keyof VehicleTank, value: any) => {
         const newTanks = [...tanks];
         newTanks[idx] = { ...newTanks[idx], [field]: value };
@@ -345,11 +406,15 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
         }
         setTanks(newTanks);
     };
+
     const toggleFuel = (idx: number, fuel: FuelType) => {
         const tank = tanks[idx];
         const hasFuel = tank.fuelTypes.includes(fuel);
         const newFuels = hasFuel ? tank.fuelTypes.filter(f => f !== fuel) : [...tank.fuelTypes, fuel];
-        if (newFuels.length === 0) return alert("Selecione pelo menos um combustível.");
+        if (newFuels.length === 0) {
+            setFormFeedback({ isOpen: true, title: "Atenção", message: "Selecione pelo menos um tipo de combustível para este tanque." });
+            return;
+        }
         updateTank(idx, 'fuelTypes', newFuels);
     };
 
@@ -362,18 +427,34 @@ function VehicleFormModal({ isOpen, onClose, onSave, vehicleToEdit }: any) {
             licensePlate: plate.toUpperCase(),
             currentOdometer: Number(odometer),
             lastOdometerDate: new Date(odometerDate).toISOString(), 
-            vin, renavam, notes, tanks
+            // Garante string vazia se undefined para evitar erro de tipo no JSON
+            vin: vin || "", 
+            renavam: renavam || "", 
+            notes: notes || "", 
+            tanks
         };
-        await onSave(vehicleData);
+        
+        const success = await onSave(vehicleData);
         setSaving(false);
-        onClose();
+        if (success) {
+            onClose();
+        }
     };
 
     const noSpinnerClass = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-default">
-            <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal de Feedback interno */}
+            <FeedbackModal 
+                isOpen={formFeedback.isOpen} 
+                onClose={() => setFormFeedback({ ...formFeedback, isOpen: false })} 
+                title={formFeedback.title} 
+                message={formFeedback.message} 
+                type="error"
+            />
+
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-5 fade-in duration-300">
                 <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-950 rounded-t-2xl">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         {vehicleToEdit ? <><Pencil size={20} className="text-blue-500"/> Editar Veículo</> : <><Plus size={20} className="text-emerald-500"/> Novo Veículo</>}
@@ -541,12 +622,16 @@ export default function VeiculosPage() {
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null); 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  const [feedback, setFeedback] = useState({ isOpen: false, title: '', message: '', type: 'error' });
+
   // FETCH VEÍCULOS (SUPABASE)
   const fetchVehicles = async () => {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
+    // SELECT inclui explicitamente todas as colunas necessárias, mas * geralmente cobre tudo.
+    // Garantimos o mapping correto abaixo.
     const { data, error } = await supabase
       .from('vehicles')
       .select('*')
@@ -570,9 +655,11 @@ export default function VeiculosPage() {
       licensePlate: v.license_plate,
       currentOdometer: v.current_odometer,
       lastOdometerDate: v.last_odometer_date,
+      // Novos Campos:
       vin: v.vin,
       renavam: v.renavam,
       notes: v.notes,
+      
       tanks: v.tanks,
       isDefault: v.is_default,
       createdAt: v.created_at,
@@ -587,12 +674,11 @@ export default function VeiculosPage() {
     fetchVehicles();
   }, []);
 
-  const handleSaveVehicle = async (data: any) => {
+  const handleSaveVehicle = async (data: any): Promise<boolean> => {
      const { data: { session } } = await supabase.auth.getSession();
-     if (!session) return;
+     if (!session) return false;
 
      try {
-         // MAP: Camel Case (App) -> Snake Case (DB)
          const payload = {
             user_id: session.user.id,
             name: data.name,
@@ -624,10 +710,14 @@ export default function VeiculosPage() {
              if (error) throw error;
          }
 
-         await fetchVehicles(); // Recarrega a lista
-     } catch (error) {
+         await fetchVehicles(); 
+         setFeedback({ isOpen: true, title: "Sucesso", message: "Veículo salvo com sucesso!", type: "success" });
+         return true; 
+     } catch (error: any) {
          console.error("Erro ao salvar:", error);
-         alert("Erro ao salvar veículo.");
+         const msg = error.message || "Verifique os dados e tente novamente.";
+         setFeedback({ isOpen: true, title: "Erro ao Salvar", message: `Ocorreu um problema: ${msg}`, type: "error" });
+         return false;
      }
   };
 
@@ -645,15 +735,15 @@ export default function VeiculosPage() {
       
       if (error) {
         console.error("Erro ao deletar:", error);
-        alert("Erro ao deletar veículo.");
+        setFeedback({ isOpen: true, title: "Erro", message: "Erro ao deletar veículo. Tente novamente.", type: "error" });
       } else {
-        await fetchVehicles(); // Recarrega a lista
+        await fetchVehicles(); 
+        setFeedback({ isOpen: true, title: "Removido", message: "Veículo removido com sucesso.", type: "success" });
       }
       setDeleteId(null);
     }
   };
 
-  // Helper para formatar a data corrigida para UTC (evita erro de fuso)
   const formatDate = (isoString?: string) => {
       if (!isoString) return "--/--";
       const datePart = isoString.split('T')[0];
@@ -665,7 +755,18 @@ export default function VeiculosPage() {
 
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* INJECT STYLES */}
+      <style>{SCROLLBAR_STYLES}</style>
       
+      {/* Modais Globais */}
+      <FeedbackModal 
+        isOpen={feedback.isOpen} 
+        onClose={() => setFeedback({ ...feedback, isOpen: false })} 
+        title={feedback.title} 
+        message={feedback.message} 
+        type={feedback.type}
+      />
+
       <ConfirmModal 
         isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete}
         title="Excluir Veículo?" message="Ao excluir o veículo, o histórico financeiro permanecerá, mas perderá o vínculo. Continuar?"
@@ -697,9 +798,6 @@ export default function VeiculosPage() {
         {vehicles.map(v => {
            const brandSlug = BRAND_LIST.find(b => b.name.toLowerCase() === (v.brand || "").toLowerCase())?.slug;
            const vehicleAny = v as any;
-           // HIERARQUIA DE DATA:
-           // 1. lastOdometerDate (Definido manualmente ou futuramente por transações)
-           // 2. createdAt (Fallback Final)
            const displayDate = vehicleAny.lastOdometerDate || v.createdAt;
 
            return (

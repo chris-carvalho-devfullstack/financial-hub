@@ -9,10 +9,19 @@ import {
   Pencil, X, Save, Calendar, ExternalLink,
   Info, Target, Layers
 } from "lucide-react";
-import { supabase } from "~/lib/supabase.client"; // ✅ Cliente Supabase
+import { supabase } from "~/lib/supabase.client"; 
 import { Platform } from "~/types/enums";
 import type { Vehicle, IncomeTransaction, Goal } from "~/types/models";
 import type { User } from "@supabase/supabase-js";
+
+// === ESTILOS CSS PARA SCROLLBAR MODERNA ===
+const SCROLLBAR_STYLES = `
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+`;
 
 // === TIPO LOCAL PARA SUPORTAR O SPLIT ===
 interface IncomeTransactionWithSplit extends IncomeTransaction {
@@ -21,6 +30,7 @@ interface IncomeTransactionWithSplit extends IncomeTransaction {
     amount: number;
     trips?: number;
   }[];
+  notes?: string; // Fallback para compatibilidade
 }
 
 // === CONFIGURAÇÃO DAS PLATAFORMAS ===
@@ -74,7 +84,7 @@ const ALL_PLATFORMS = [
 const MULTIPLE_PLATFORM_CONFIG = {
   id: 'MULTIPLE',
   label: 'Múltiplos Apps',
-  icon: <Layers size={32} className="text-white" />, // Icone maior para o header
+  icon: <Layers size={32} className="text-white" />, 
   bg: 'bg-indigo-600',
   textColor: 'text-white'
 };
@@ -92,8 +102,8 @@ function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: an
   const buttonColor = isSuccess ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500';
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
         <div className="flex flex-col items-center text-center gap-4">
           <div className={`${bgColor} p-4 rounded-full`}>
             <Icon className={iconColor} size={32} />
@@ -104,7 +114,7 @@ function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: an
           </div>
           <button
             onClick={onClose}
-            className={`w-full ${buttonColor} text-white py-3 rounded-xl font-bold transition-colors mt-2`}
+            className={`w-full ${buttonColor} text-white py-3 rounded-xl font-bold transition-colors mt-2 cursor-pointer`}
           >
             Entendido
           </button>
@@ -117,8 +127,8 @@ function FeedbackModal({ isOpen, onClose, type = 'success', title, message }: an
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
             <AlertTriangle className="text-red-500" size={24} />
@@ -131,13 +141,13 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
         <div className="flex gap-3 mt-6">
           <button 
             onClick={onClose} 
-            className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded-lg font-medium transition-colors"
+            className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded-lg font-medium transition-colors cursor-pointer"
           >
             Cancelar
           </button>
           <button 
             onClick={onConfirm} 
-            className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-medium transition-colors"
+            className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg font-medium transition-colors cursor-pointer"
           >
             Sim, excluir
           </button>
@@ -151,28 +161,23 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
 function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { isOpen: boolean, onClose: () => void, transaction: IncomeTransactionWithSplit | null, onUpdate: any }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
-  
-  // Estado para os splits editáveis
   const [splitFormData, setSplitFormData] = useState<any[]>([]);
-
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
 
-  // Carrega os dados quando a transação muda ou o modal abre
   useEffect(() => {
     if (transaction) {
       setFormData({
         amount: (transaction.amount / 100).toFixed(2),
-        date: new Date(transaction.date).toLocaleDateString('en-CA'),
+        date: new Date(transaction.date).toISOString().split('T')[0],
         distanceDriven: transaction.distanceDriven || 0,
         odometer: transaction.odometer || 0,
         clusterKmPerLiter: transaction.clusterKmPerLiter || 0,
         onlineDurationMinutes: transaction.onlineDurationMinutes ? (transaction.onlineDurationMinutes / 60).toFixed(1) : 0,
         tripsCount: transaction.tripsCount || 0,
-        description: transaction.description || ""
+        description: transaction.description || transaction.notes || ""
       });
 
-      // Carrega o split e converte centavos para reais (string)
       if (transaction.split && transaction.split.length > 0) {
         setSplitFormData(transaction.split.map(s => ({
             ...s,
@@ -182,12 +187,10 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       } else {
         setSplitFormData([]);
       }
-
       setIsEditing(false);
     }
   }, [transaction]);
 
-  // Recalcula totais quando o splitFormData é alterado durante a edição
   useEffect(() => {
     if (isEditing && splitFormData.length > 0) {
         let totalAmount = 0;
@@ -209,8 +212,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
   if (!isOpen || !transaction) return null;
 
   const isMultiple = (transaction.platform as string) === 'MULTIPLE';
-  
-  // Lógica correta para pegar configuração
   const platformInfo = isMultiple 
       ? MULTIPLE_PLATFORM_CONFIG 
       : ALL_PLATFORMS.find(p => p.id === transaction.platform) || ALL_PLATFORMS[5];
@@ -227,15 +228,15 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
         date: new Date(`${formData.date}T00:00:00`).toISOString(),
-        distance_driven: Number(formData.distanceDriven), // Mapeamento para snake_case
+        distance_driven: Number(formData.distanceDriven), 
         odometer: Number(formData.odometer),
-        cluster_km_per_liter: Number(formData.clusterKmPerLiter), // Mapeamento para snake_case
-        online_duration_minutes: Math.round(Number(formData.onlineDurationMinutes) * 60), // Mapeamento para snake_case
-        trips_count: Number(formData.tripsCount), // Mapeamento para snake_case
-        description: formData.description
+        cluster_km_per_liter: Number(formData.clusterKmPerLiter), 
+        online_duration_minutes: Math.round(Number(formData.onlineDurationMinutes) * 60), 
+        trips_count: Number(formData.tripsCount), 
+        description: formData.description,
+        notes: formData.description
       };
 
-      // Se for múltiplo, precisamos salvar o split atualizado
       if (isMultiple && splitFormData.length > 0) {
         updates.split = splitFormData.map(item => ({
             platform: item.platform,
@@ -263,9 +264,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
     <div className={`bg-gray-800/50 p-2 rounded-lg border border-gray-700 ${readOnly ? 'opacity-60' : ''}`}>
       <label className="text-[10px] uppercase text-gray-500 font-bold block mb-1">{label}</label>
       <input 
-        type={type} 
-        step={step}
-        readOnly={readOnly}
+        type={type} step={step} readOnly={readOnly}
         value={formData[field]} 
         onChange={e => !readOnly && setFormData({...formData, [field]: e.target.value})}
         className={`w-full bg-transparent text-white font-bold outline-none border-b text-sm py-1 ${readOnly ? 'border-transparent cursor-not-allowed' : 'border-gray-600 focus:border-emerald-500'}`}
@@ -284,7 +283,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       
       {feedback && (
           <FeedbackModal 
@@ -296,19 +295,18 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
           />
       )}
 
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-5 duration-300">
         
         {/* HEADER */}
         <div className={`p-6 pb-8 relative ${platformInfo.bg}`}>
-           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors">
+           <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors cursor-pointer">
               <X size={20} />
            </button>
            
            <div className="flex flex-col items-center">
               <div className={`w-16 h-16 rounded-2xl shadow-xl flex items-center justify-center p-2 mb-4 overflow-hidden ${isMultiple ? 'bg-indigo-500/50 backdrop-blur-sm border border-white/20' : 'bg-white'}`}>
-                  {/* Lógica de Renderização do Ícone/Logo */}
                   {isMultiple ? (
-                    platformInfo.icon // Renderiza o <Layers />
+                    platformInfo.icon
                   ) : (
                     (platformInfo as any).logo ? <img src={(platformInfo as any).logo} className="w-full object-contain" /> : platformInfo.icon
                   )}
@@ -323,11 +321,9 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
         </div>
 
         {/* BODY */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
            {isEditing ? (
               <div className="grid grid-cols-2 gap-3">
-                 
-                 {/* SE FOR MULTIPLE: MOSTRA CAMPOS DE EDIÇÃO INDIVIDUAL */}
                  {isMultiple && splitFormData.length > 0 && (
                     <div className="col-span-2 space-y-2 mb-2 bg-gray-800/30 p-3 rounded-xl border border-dashed border-gray-700">
                         <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-1">
@@ -396,7 +392,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                     </p>
                  </div>
 
-                 {/* DETALHAMENTO DO SPLIT (VIEW MODE) */}
                  {isMultiple && transaction.split && (
                    <div className="bg-gray-800/40 rounded-xl p-3 border border-gray-700/50 space-y-2">
                       <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-1">
@@ -450,14 +445,14 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
              <>
                <button 
                  onClick={() => setIsEditing(false)}
-                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors"
+                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors cursor-pointer"
                >
                  Cancelar
                </button>
                <button 
                  onClick={handleSave}
                  disabled={saving}
-                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer"
                >
                  {saving ? "Salvando..." : <><Save size={18}/> Salvar</>}
                </button>
@@ -465,7 +460,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
            ) : (
              <button 
                onClick={() => setIsEditing(true)}
-               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"
+               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700 cursor-pointer"
              >
                <Pencil size={18} /> Editar Lançamento
              </button>
@@ -476,7 +471,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
     </div>
   );
 }
-
 
 // === PÁGINA PRINCIPAL ===
 
@@ -492,26 +486,18 @@ export default function GanhosPage() {
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [lastFuelPrice, setLastFuelPrice] = useState(0); 
   
-  // ESTADO PARA O MODAL DE DETALHES
   const [selectedTransaction, setSelectedTransaction] = useState<IncomeTransactionWithSplit | null>(null);
-
-  // NOVO: Feedback Global
   const [feedback, setFeedback] = useState<{isOpen: boolean, type: 'success'|'error', title: string, message: string} | null>(null);
 
   // === ESTADOS DO FORMULÁRIO ===
   const [selectedVehicle, setSelectedVehicle] = useState("");
-  
-  // SELEÇÃO MÚLTIPLA
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]); // Array para múltipla escolha
-  const [splitData, setSplitData] = useState<{[key: string]: { amount: string, trips: string }}>({}); // Dados individuais por app
-
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]); 
+  const [splitData, setSplitData] = useState<{[key: string]: { amount: string, trips: string }}>({}); 
   const [targetGoalId, setTargetGoalId] = useState("");
   
-  // Totais (Calculados ou inseridos)
   const [amount, setAmount] = useState("");
   const [trips, setTrips] = useState("");
-  
-  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [distance, setDistance] = useState(""); 
   const [odometerInput, setOdometerInput] = useState(""); 
   const [clusterAvg, setClusterAvg] = useState(""); 
@@ -520,14 +506,12 @@ export default function GanhosPage() {
 
   const displayedPlatforms = showAllPlatforms ? ALL_PLATFORMS : ALL_PLATFORMS.slice(0, 3);
 
-  // === 0. AUTENTICAÇÃO ===
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
         if (data.user) setUser(data.user);
     });
   }, []);
 
-  // === EFEITO PARA SOMAR TOTAIS SE HOUVER MÚLTIPLOS APPS ===
   useEffect(() => {
     if (selectedPlatforms.length > 1) {
       let totalAmount = 0;
@@ -546,7 +530,6 @@ export default function GanhosPage() {
     }
   }, [splitData, selectedPlatforms]);
 
-  // Função para alternar seleção de plataforma
   const togglePlatform = (id: Platform) => {
     setSelectedPlatforms(prev => {
       if (prev.includes(id)) {
@@ -557,7 +540,6 @@ export default function GanhosPage() {
     });
   };
 
-  // Função para atualizar dados do split
   const updateSplitData = (platformId: string, field: 'amount' | 'trips', value: string) => {
     setSplitData(prev => ({
       ...prev,
@@ -568,24 +550,20 @@ export default function GanhosPage() {
     }));
   };
 
-  // === 1. FETCH E REALTIME: VEÍCULOS E PREFERÊNCIA ===
   const fetchVehiclesAndPref = useCallback(async () => {
     if (!user) return;
-    
-    // Busca veículos
     const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
     if (vData) {
        const mappedVehicles = vData.map(v => ({
-          ...v,
-          userId: v.user_id, // Map snake_case
-          licensePlate: v.license_plate, // Map snake_case
-          currentOdometer: v.current_odometer, // Map snake_case
-          lastOdometerDate: v.last_odometer_date, // Map snake_case
-          isDefault: v.is_default // Map snake_case
+         ...v,
+         userId: v.user_id,
+         licensePlate: v.license_plate, 
+         currentOdometer: v.current_odometer, 
+         lastOdometerDate: v.last_odometer_date, 
+         isDefault: v.is_default 
        }));
        setVehicles(mappedVehicles as any);
 
-       // Se não tem selecionado, tenta pegar do perfil ou pega o primeiro
        if (!selectedVehicle) {
             const { data: pData } = await supabase.from('profiles').select('last_selected_vehicle_id').eq('id', user.id).single();
             if (pData?.last_selected_vehicle_id) {
@@ -600,7 +578,6 @@ export default function GanhosPage() {
  useEffect(() => {
    if (user) {
        fetchVehiclesAndPref();
-       // Assina mudanças na tabela de veículos para manter a lista atualizada (Realtime)
        const channel = supabase.channel('realtime-vehicles')
            .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => {
                fetchVehiclesAndPref();
@@ -611,7 +588,6 @@ export default function GanhosPage() {
    }
  }, [user, fetchVehiclesAndPref]);
 
-  // === 2. FETCH E REALTIME: METAS ===
   const fetchGoals = useCallback(async () => {
       if (!user) return;
       const { data, error } = await supabase.from('goals').select('*').eq('user_id', user.id).eq('status', 'ACTIVE');
@@ -637,7 +613,6 @@ export default function GanhosPage() {
     }
   }, [user, fetchGoals]);
 
-  // === 3. FETCH E REALTIME: HISTÓRICO DE GANHOS ===
   const fetchRecentGains = useCallback(async () => {
     if (!user || !selectedVehicle) return;
     setLoading(true);
@@ -656,11 +631,16 @@ export default function GanhosPage() {
            ...t,
            userId: t.user_id,
            vehicleId: t.vehicle_id,
-           distanceDriven: t.distance_driven,
-           onlineDurationMinutes: t.online_duration_minutes,
-           tripsCount: t.trips_count,
+           // Mapping para garantir compatibilidade com colunas do DB
+           // DB (snake_case) -> App (camelCase)
+           distanceDriven: t.distance_driven || t.distance || 0,
+           onlineDurationMinutes: t.online_duration_minutes || t.duration || 0,
+           tripsCount: t.trips_count || t.trip_count || 0,
            clusterKmPerLiter: t.cluster_km_per_liter,
-           linkedGoalId: t.linked_goal_id
+           linkedGoalId: t.linked_goal_id,
+           // Se 'notes' existir no banco, jogamos para 'description' e 'notes'
+           description: t.description || t.notes || "",
+           notes: t.notes || t.description || "" // Fallback
        }));
        setRecentGains(mapped as any);
     }
@@ -670,12 +650,10 @@ export default function GanhosPage() {
  useEffect(() => {
    if (user && selectedVehicle) {
        fetchRecentGains();
-
-       // Realtime para Transações
        const channel = supabase.channel(`realtime-gains-${selectedVehicle}`)
            .on('postgres_changes', 
                { event: '*', schema: 'public', table: 'transactions', filter: `vehicle_id=eq.${selectedVehicle}` }, 
-               () => fetchRecentGains() // Recarrega a lista ao detectar mudança
+               () => fetchRecentGains() 
            )
            .subscribe();
 
@@ -684,11 +662,9 @@ export default function GanhosPage() {
  }, [user, selectedVehicle, fetchRecentGains]);
 
 
-  // === 3. PREÇO COMBUSTIVEL E ODÔMETRO ===
   useEffect(() => {
     if (!selectedVehicle) return;
     
-    // Preço (Supabase)
     const fetchLastPrice = async () => {
       const { data } = await supabase.from('transactions')
         .select('price_per_liter')
@@ -706,7 +682,6 @@ export default function GanhosPage() {
     };
     fetchLastPrice();
 
-    // Odômetro (State Local dos Veículos)
     if (vehicles.length > 0) {
         const v = vehicles.find(vec => vec.id === selectedVehicle);
         if (v) {
@@ -721,7 +696,6 @@ export default function GanhosPage() {
     }
   };
 
-  // === CÁLCULOS ===
   const tripKm = parseFloat(distance) || 0;
   const panelAvg = parseFloat(clusterAvg) || 0;
   
@@ -737,8 +711,6 @@ export default function GanhosPage() {
     g.linkedVehicleIds.length === 0 || 
     g.linkedVehicleIds.includes(selectedVehicle)
   );
-
-  // === AÇÕES ===
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -758,7 +730,6 @@ export default function GanhosPage() {
       const finalOdometer = Number(odometerInput) || 0; 
       const tripsNum = Number(trips) || 0;
 
-      // DEFINIR PLATAFORMA E SPLIT
       let finalPlatform = selectedPlatforms[0];
       let finalSplit = null;
 
@@ -774,6 +745,7 @@ export default function GanhosPage() {
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
+      // CORREÇÃO DO PAYLOAD PARA O BANCO (Usando nomes padrão)
       const transactionData: any = {
         user_id: user.id,
         vehicle_id: selectedVehicle,
@@ -781,17 +753,24 @@ export default function GanhosPage() {
         platform: finalPlatform,
         amount: amountCents,
         date: new Date(`${date}T00:00:00`).toISOString(),
-        distance_driven: drivenKm, 
-        online_duration_minutes: Math.round(hoursNum * 60),
-        trips_count: tripsNum,
+        
+        // Mapeamento correto para colunas existentes (ou que devem existir)
+        distance: drivenKm,  // Mudei de distance_driven para distance (padrão anterior)
+        duration: Math.round(hoursNum * 60), // Mudei de online_duration_minutes para duration
+        trip_count: tripsNum, // Mudei de trips_count para trip_count
+        notes: description, // Mudei de description para notes
+        
+        // Colunas Novas (Precisam ser criadas no DB)
         cluster_km_per_liter: avgNum,
+        split: finalSplit ? finalSplit : undefined, 
+        
         odometer: finalOdometer, 
-        description: description, 
-        split: finalSplit ? finalSplit : undefined, // Supabase aceita JSONB diretamente
         linked_goal_id: targetGoalId || null
       };
 
-      await supabase.from('transactions').insert(transactionData);
+      
+      const { error: txError } = await supabase.from('transactions').insert(transactionData);
+      if (txError) throw txError; // <--- Isso vai travar e mostrar o erro real no console
 
       if (finalOdometer > startOdometer) {
          await supabase.from('vehicles').update({
@@ -802,24 +781,27 @@ export default function GanhosPage() {
       }
 
       if (targetGoalId && estimatedProfit > 0) {
-          // Busca meta atual para incrementar (Supabase não tem atomic increment no client)
           const { data: goal } = await supabase.from('goals').select('current_amount').eq('id', targetGoalId).single();
-          
           if (goal) {
               await supabase.from('goals').update({
                   current_amount: goal.current_amount + estimatedProfit
               }).eq('id', targetGoalId);
           }
-
           setFeedback({
             isOpen: true,
             type: 'success',
             title: 'Meta Atualizada!',
             message: `Sucesso! ${estimatedProfit.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} foram destinados para a meta! 🎯`
           });
+      } else {
+        setFeedback({
+            isOpen: true,
+            type: 'success',
+            title: 'Sucesso!',
+            message: 'Ganho registrado com sucesso.'
+        });
       }
 
-      // RESET
       setAmount("");
       setDistance("");
       setOdometerInput(""); 
@@ -879,7 +861,6 @@ export default function GanhosPage() {
   const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatMoneyFloat = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   
-  // Função atualizada para retornar dados de MULTIPLE se necessário
   const getPlatformDetails = (id: string) => {
     if (id === 'MULTIPLE') return MULTIPLE_PLATFORM_CONFIG;
     return ALL_PLATFORMS.find(p => p.id === id) || ALL_PLATFORMS[5];
@@ -888,7 +869,8 @@ export default function GanhosPage() {
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
-      {/* MODAIS */}
+      <style>{SCROLLBAR_STYLES}</style>
+
       {feedback && (
           <FeedbackModal 
              isOpen={feedback.isOpen} 
@@ -926,7 +908,6 @@ export default function GanhosPage() {
 
           <form onSubmit={handleSave} className="space-y-6 md:space-y-8">
               
-             {/* SELEÇÃO DE VEÍCULO */}
              <div className="bg-gray-900/50 p-3 md:p-4 rounded-xl border border-gray-800 active:border-emerald-500/50 transition-colors">
                <label className="text-gray-400 text-xs font-bold uppercase mb-2 block tracking-wider">Veículo</label>
                <div className="relative">
@@ -940,7 +921,7 @@ export default function GanhosPage() {
                             await supabase.from('profiles').update({ last_selected_vehicle_id: newId }).eq('id', user.id);
                         }
                     }}
-                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-emerald-500 outline-none appearance-none font-medium h-12"
+                    className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg py-3 pl-10 pr-4 focus:ring-2 focus:ring-emerald-500 outline-none appearance-none font-medium h-12 cursor-pointer"
                   >
                     {vehicles.map(v => (
                       <option key={v.id} value={v.id}>{v.name}</option>
@@ -949,7 +930,6 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* PLATAFORMA (MULTI-SELECT) */}
             <div>
                <label className="text-gray-400 text-xs font-bold uppercase mb-3 block tracking-wider">
                  Plataforma(s) {selectedPlatforms.length > 0 && <span className="text-emerald-500 ml-1">({selectedPlatforms.length})</span>}
@@ -962,7 +942,7 @@ export default function GanhosPage() {
                          key={p.id}
                          type="button"
                          onClick={() => togglePlatform(p.id as Platform)}
-                         className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
+                         className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 cursor-pointer ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
                        >
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
                             {p.logo ? <img src={p.logo} alt={p.label} className="w-full h-full object-cover" /> : p.icon}
@@ -973,22 +953,19 @@ export default function GanhosPage() {
                      )
                   })}
                   {!showAllPlatforms && (
-                    <button type="button" onClick={() => setShowAllPlatforms(true)} className="h-28 rounded-2xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex flex-col items-center justify-center gap-2 group active:scale-95">
+                    <button type="button" onClick={() => setShowAllPlatforms(true)} className="h-28 rounded-2xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex flex-col items-center justify-center gap-2 group active:scale-95 cursor-pointer">
                       <div className="w-10 h-10 rounded-xl bg-gray-800 flex items-center justify-center group-hover:bg-gray-700"><LayoutGrid size={20} /></div>
                       <span className="font-bold text-sm">Ver Mais</span>
                     </button>
                   )}
                   {showAllPlatforms && (
-                    <button type="button" onClick={() => setShowAllPlatforms(false)} className="h-28 rounded-2xl border border-dashed border-gray-700 bg-transparent text-gray-500 hover:text-white hover:border-gray-500 transition-all flex flex-col items-center justify-center gap-1 active:scale-95">
+                    <button type="button" onClick={() => setShowAllPlatforms(false)} className="h-28 rounded-2xl border border-dashed border-gray-700 bg-transparent text-gray-500 hover:text-white hover:border-gray-500 transition-all flex flex-col items-center justify-center gap-1 active:scale-95 cursor-pointer">
                       <ChevronUp size={24} /><span className="text-xs font-medium">Recolher</span>
                     </button>
                   )}
                </div>
             </div>
 
-            {/* ÁREA DE INPUT DE VALORES (CONDICIONAL: SINGLE vs MULTIPLE) */}
-            
-            {/* SE MÚLTIPLOS APPS: MOSTRAR INPUTS INDIVIDUAIS */}
             {selectedPlatforms.length > 1 && (
                <div className="space-y-3 bg-gray-900/30 p-4 rounded-xl border border-gray-800">
                   <h4 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -1031,7 +1008,6 @@ export default function GanhosPage() {
                </div>
             )}
 
-            {/* DADOS FINANCEIROS GERAIS (TOTAL OU ÚNICO) */}
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 md:p-6 shadow-xl relative overflow-hidden">
                <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
@@ -1043,7 +1019,6 @@ export default function GanhosPage() {
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-xl md:text-2xl">R$</span>
                         <input 
                           type="number" step="0.01" required inputMode="decimal" min="0"
-                          // Se tiver multiplos, é readOnly
                           readOnly={selectedPlatforms.length > 1}
                           value={amount} onChange={e => setAmount(e.target.value)} 
                           onKeyDown={preventNegativeInput}
@@ -1059,7 +1034,6 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* === SELETOR DE META INTELIGENTE === */}
             {goalsForThisVehicle.length > 0 && (
                 <div className="bg-gradient-to-br from-purple-900/20 to-gray-900 border border-purple-500/20 p-4 rounded-xl shadow-lg">
                    <div className="flex items-center gap-2 mb-3">
@@ -1092,10 +1066,8 @@ export default function GanhosPage() {
                 </div>
             )}
 
-            {/* MÉTRICAS */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                
-               {/* 1. KM RODADOS (TRIP) */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">KM Rodados (Trip)</label>
                    <div className="flex items-center gap-1.5">
@@ -1110,7 +1082,6 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 2. ODÔMETRO FINAL (PAINEL) */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-emerald-500/30 flex flex-col justify-center relative overflow-hidden">
                    <div className="absolute top-0 right-0 w-3 h-3 bg-emerald-500 blur-md opacity-20"></div>
                    <label className="text-emerald-400 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Odômetro Final</label>
@@ -1126,7 +1097,6 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 3. MÉDIA PAINEL */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Média Painel</label>
                    <div className="flex items-center gap-1.5">
@@ -1141,7 +1111,6 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 4. HORAS */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
                    <div className="flex items-center gap-1.5">
@@ -1156,7 +1125,6 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 5. VIAGENS (AUTO CALCULADO SE MULTIPLE) */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">
                      {selectedPlatforms.length > 1 ? "Viagens (Total)" : "Viagens"}
@@ -1174,7 +1142,6 @@ export default function GanhosPage() {
                    </div>
                </div>
 
-               {/* 6. OBSERVAÇÃO */}
                <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
                    <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Observação</label>
                    <div className="flex items-center gap-1.5">
@@ -1189,14 +1156,12 @@ export default function GanhosPage() {
                </div>
             </div>
 
-            {/* === MONITOR DE EFICIÊNCIA OPERACIONAL === */}
             {(tripKm > 0 && panelAvg > 0) && (
               <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center gap-2 mb-3">
                     <h4 className="text-gray-400 text-xs font-bold uppercase flex items-center gap-2">
                         <Zap size={14} className="text-yellow-500"/> Análise da Trip (Estimada)
                     </h4>
-                    {/* TOOLTIP DE AJUDA */}
                     <div className="relative group">
                         <Info size={14} className="text-gray-500 cursor-help" />
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 border border-gray-700 rounded-lg text-[10px] text-gray-300 text-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50">
@@ -1207,8 +1172,6 @@ export default function GanhosPage() {
                 </div>
                 
                 <div className="grid grid-cols-3 gap-4 text-center divide-x divide-gray-700">
-                  
-                  {/* 1. O Custo Calculado */}
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase">Custo Comb.</p>
                     <p className="text-red-400 font-bold text-lg">
@@ -1221,7 +1184,6 @@ export default function GanhosPage() {
                     )}
                   </div>
 
-                  {/* 2. O Lucro Real Aproximado */}
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase">Lucro Líquido</p>
                     <p className={`font-bold text-lg ${estimatedProfit > 0 ? 'text-emerald-400' : 'text-red-500'}`}>
@@ -1229,25 +1191,22 @@ export default function GanhosPage() {
                     </p>
                   </div>
 
-                  {/* 3. Eficiência (R$/km) */}
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase">Custo/KM</p>
                     <p className="text-yellow-500 font-bold text-lg">
                        {((estimatedCost / tripKm) || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
                     </p>
                   </div>
-                  
                 </div>
               </div>
             )}
 
-            <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-base md:text-lg h-14 md:h-16">
+            <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-base md:text-lg h-14 md:h-16 cursor-pointer">
               {saving ? "Salvando..." : <><DollarSign size={20} /> Confirmar Lançamento</>}
             </button>
           </form>
         </div>
 
-        {/* COLUNA DIREITA: HISTÓRICO */}
         <div className="flex-1 w-full md:border-l md:border-gray-800 md:pl-8">
            <div className="mt-8 md:mt-[112px]">
               <div className="flex items-center justify-between mb-4">
@@ -1256,75 +1215,73 @@ export default function GanhosPage() {
               </div>
 
               {!loading && recentGains.map(gain => {
-                 const platformInfo = getPlatformDetails(gain.platform);
-                 const isDeleting = deletingId === gain.id;
-                 const isMultiple = gain.platform === 'MULTIPLE';
-                 
-                 return (
-                   <div 
-                     key={gain.id} 
-                     onClick={() => setSelectedTransaction(gain)}
-                     className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
-                   >
-                      <div className="flex items-center gap-3">
-                         <div className={`w-10 h-10 min-w-[2.5rem] rounded-xl flex items-center justify-center shadow-sm overflow-hidden relative ${isMultiple ? 'bg-indigo-600' : 'bg-white'}`}>
-                           {/* Se for MULTIPLE, exibe o ícone de camadas, senão a logo normal */}
-                           {isMultiple ? (
+                  const platformInfo = getPlatformDetails(gain.platform);
+                  const isDeleting = deletingId === gain.id;
+                  const isMultiple = gain.platform === 'MULTIPLE';
+                  
+                  return (
+                    <div 
+                      key={gain.id} 
+                      onClick={() => setSelectedTransaction(gain)}
+                      className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
+                    >
+                       <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 min-w-[2.5rem] rounded-xl flex items-center justify-center shadow-sm overflow-hidden relative ${isMultiple ? 'bg-indigo-600' : 'bg-white'}`}>
+                            {isMultiple ? (
                              <Layers size={20} className="text-white"/>
-                           ) : (
+                            ) : (
                              (platformInfo as any).logo ? <img src={(platformInfo as any).logo} alt={platformInfo.label} className="w-full h-full object-cover" /> : platformInfo.icon
-                           )}
-                         </div>
-                         <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
-                                {platformInfo.label}
-                                <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
-                              </p>
-                              {/* TAG VISUAL DE APPS ENVOLVIDOS (Mini Logos) */}
-                              {isMultiple && gain.split && (
-                                <div className="flex -space-x-1.5">
-                                   {gain.split.map((s, idx) => {
-                                      const miniLogo = ALL_PLATFORMS.find(mp => mp.id === s.platform)?.logo;
-                                      if (!miniLogo) return null;
-                                      return (
-                                        <div key={idx} className="w-4 h-4 rounded-full bg-white border border-gray-800 overflow-hidden z-10">
-                                           <img src={miniLogo} className="w-full h-full object-cover"/>
-                                        </div>
-                                      )
-                                   })}
-                                </div>
-                              )}
-                            </div>
-                            
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
-                               <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
-                               {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
-                                  <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-orange-400 font-mono">
-                                     <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
-                                  </span>
+                            )}
+                          </div>
+                          <div>
+                             <div className="flex items-center gap-2">
+                               <p className="font-bold text-white text-sm leading-tight group-hover:text-emerald-400 transition-colors flex items-center gap-2">
+                                 {platformInfo.label}
+                                 <ExternalLink size={10} className="opacity-0 group-hover:opacity-50" />
+                               </p>
+                               {isMultiple && gain.split && (
+                                 <div className="flex -space-x-1.5">
+                                    {gain.split.map((s, idx) => {
+                                       const miniLogo = ALL_PLATFORMS.find(mp => mp.id === s.platform)?.logo;
+                                       if (!miniLogo) return null;
+                                       return (
+                                         <div key={idx} className="w-4 h-4 rounded-full bg-white border border-gray-800 overflow-hidden z-10">
+                                            <img src={miniLogo} className="w-full h-full object-cover"/>
+                                         </div>
+                                       )
+                                    })}
+                                 </div>
                                )}
-                               {gain.description && (
-                                 <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
-                                     <FileText size={10}/> {gain.description}
-                                 </span>
-                               )}
-                            </div>
-                         </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                         <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
-                         <button 
-                           onClick={(e) => handleRequestDelete(e, gain.id)} 
-                           disabled={isDeleting} 
-                           className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
-                           title="Excluir"
-                         >
-                           <Trash2 size={16} />
-                         </button>
-                      </div>
-                   </div>
-                 );
+                             </div>
+                             
+                             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                                {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
+                                   <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-orange-400 font-mono">
+                                      <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
+                                   </span>
+                                )}
+                                {gain.notes && (
+                                   <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
+                                       <FileText size={10}/> {gain.notes}
+                                   </span>
+                                )}
+                             </div>
+                          </div>
+                       </div>
+                       <div className="flex items-center gap-3">
+                          <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
+                          <button 
+                            onClick={(e) => handleRequestDelete(e, gain.id)} 
+                            disabled={isDeleting} 
+                            className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10"
+                            title="Excluir"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                       </div>
+                    </div>
+                  );
               })}
            </div>
         </div>
