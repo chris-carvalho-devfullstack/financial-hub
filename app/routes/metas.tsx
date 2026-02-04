@@ -6,20 +6,34 @@ import {
   TrendingUp, CheckCircle2, Car, Filter, Check, AlertTriangle, 
   DollarSign, X, History, Pencil, Wallet, ArrowRight, Info
 } from "lucide-react";
-import { supabase } from "~/lib/supabase.client"; // ✅ Supabase Client
+import { supabase } from "~/lib/supabase.client";
 import { Platform } from "~/types/enums";
-import type { Goal, Vehicle, Transaction } from "~/types/models";
+import type { Goal, Vehicle } from "~/types/models";
 import type { User } from "@supabase/supabase-js";
 
 // === CSS UTILITÁRIO ===
 const noSpinnerClass = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
-// === COMPONENTES DE MODAL ===
+// === HELPERS ===
+// Agora retorna um array de objetos com src e alt para suportar múltiplos logos
+const getPlatformLogos = (platform: string | null) => {
+  if (!platform) return [];
+  const p = platform.toLowerCase();
+  const logos = [];
+  
+  if (p.includes('uber')) logos.push({ src: '/logos/uber.png', alt: 'Uber' });
+  if (p.includes('99')) logos.push({ src: '/logos/99.png', alt: '99' });
+  if (p.includes('indriver')) logos.push({ src: '/logos/indriver.png', alt: 'inDriver' });
+  if (p.includes('ifood')) logos.push({ src: '/logos/ifood.png', alt: 'iFood' });
+  if (p.includes('ze') || p.includes('delivery')) logos.push({ src: '/logos/ze-delivery.png', alt: 'Zé Delivery' });
+  
+  return logos;
+};
 
+// === COMPONENTES DE MODAL ===
 function FeedbackModal({ isOpen, onClose, type, title, message }: any) {
   if (!isOpen) return null;
   const isSuccess = type === 'success';
-
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className={`bg-gray-900 border ${isSuccess ? 'border-emerald-500/30' : 'border-red-500/30'} rounded-2xl p-6 max-w-sm w-full shadow-2xl transform scale-100 transition-all`}>
@@ -63,9 +77,7 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
 
 function InputModal({ isOpen, onClose, onConfirm, title }: any) {
   const [value, setValue] = useState("");
-
   if (!isOpen) return null;
-
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!value) return;
@@ -73,7 +85,6 @@ function InputModal({ isOpen, onClose, onConfirm, title }: any) {
     setValue("");
     onClose();
   };
-
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
@@ -82,16 +93,10 @@ function InputModal({ isOpen, onClose, onConfirm, title }: any) {
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
                <DollarSign size={20} className="text-emerald-500"/> {title}
             </h3>
-            
             <form onSubmit={handleSubmit}>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-lg">R$</span>
-                <input
-                    type="number" autoFocus required step="0.01" min="0"
-                    value={value} onChange={e => setValue(e.target.value)}
-                    className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-emerald-500 placeholder-gray-600 ${noSpinnerClass}`}
-                    placeholder="0.00"
-                />
+                <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-emerald-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
               </div>
               <div className="flex gap-3 mt-6">
                 <button type="button" onClick={() => { setValue(""); onClose(); }} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
@@ -104,7 +109,7 @@ function InputModal({ isOpen, onClose, onConfirm, title }: any) {
   );
 }
 
-// === MODAL DE DETALHES (Extrato Completo) ===
+// === MODAL DE DETALHES (AUMENTADO E CORRIGIDO) ===
 function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }: any) {
     const [history, setHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
@@ -115,8 +120,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
         const fetchHistory = async () => {
             setLoadingHistory(true);
             try {
-                // Busca transações no Supabase vinculadas a esta meta
-                const { data, error } = await supabase
+                const { data: linkedTransactions, error } = await supabase
                     .from("transactions")
                     .select("*")
                     .eq("linked_goal_id", goal.id)
@@ -124,33 +128,24 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
                 if (error) throw error;
                 
-                // Mapeia transações
-                const linkedTransactions: any[] = (data || []).map(d => ({ 
-                    id: d.id, 
-                    ...d,
-                    // Se description for 'Aporte Manual' ou type diferente de INCOME normal, trata como manual
-                    source: d.type === 'INCOME' && d.description !== 'Aporte Manual' ? 'TRANSACTION' : 'MANUAL' 
+                const mappedTransactions: any[] = (linkedTransactions || []).map(d => ({ 
+                    ...d, 
+                    source: d.type === 'INCOME' ? 'TRANSACTION' : 'MANUAL' 
                 }));
                 
-                // Calcula saldo legado
-                const totalTracked = linkedTransactions.reduce((acc, curr: any) => acc + (curr.amount / 100), 0);
-                const legacyAmount = (goal.currentAmount / 100) - totalTracked; // goal.currentAmount já vem em centavos do banco, mas aqui no frontend tratamos divido por 100 em alguns locais? Vamos padronizar: goal.currentAmount vem em centavos do DB.
-                // Ajuste: No componente pai, currentAmount é centavos. Aqui, totalTracked é Reais.
-                // Vamos converter tudo para centavos para calcular.
+                const totalTracked = mappedTransactions.reduce((acc, curr: any) => acc + (curr.amount / 100), 0);
+                const legacyAmount = goal.currentAmount - totalTracked;
                 
-                const totalTrackedCents = linkedTransactions.reduce((acc, curr: any) => acc + curr.amount, 0);
-                const legacyAmountCents = goal.currentAmount - totalTrackedCents;
+                const finalHistory: any[] = [...mappedTransactions];
                 
-                const finalHistory: any[] = [...linkedTransactions];
-                
-                // Adiciona entrada de legado se houver discrepância significativa (> 10 centavos)
-                if (legacyAmountCents > 10) {
+                if (legacyAmount > 0.10) {
                     finalHistory.push({
                         id: 'legacy-entry',
-                        amount: legacyAmountCents, 
+                        amount: legacyAmount * 100, 
                         description: 'Saldo Anterior / Inicial',
                         date: goal.createdAt, 
-                        source: 'LEGACY'
+                        source: 'LEGACY',
+                        platform: null
                     });
                 }
 
@@ -169,11 +164,12 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
     const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
     const linkedCarNames = vehicles.filter((v: any) => goal.linkedVehicleIds?.includes(v.id)).map((v: any) => v.name);
-    const formatVal = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const formatVal = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Aumentado de max-w-lg para max-w-2xl para dar mais espaço */}
+            <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
                 
                 {/* Header */}
                 <div className="p-6 border-b border-gray-800 relative">
@@ -189,7 +185,6 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                         </div>
                     </div>
 
-                    {/* Tags de Veículos no Modal */}
                     <div className="flex flex-wrap gap-2 mt-3">
                         {linkedCarNames.length > 0 ? (
                             linkedCarNames.map((name: string) => (
@@ -208,7 +203,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                 {/* Body - Stats & Extrato */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                     
-                    {/* Card Principal de Progresso */}
+                    {/* Card Principal */}
                     <div className="bg-gray-800/50 rounded-2xl p-5 border border-gray-700">
                         <div className="flex justify-between items-end mb-2">
                             <span className="text-gray-400 text-xs font-bold uppercase tracking-wider">Progresso Atual</span>
@@ -230,14 +225,12 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                         </div>
                     </div>
 
-                    {/* Descrição */}
                     {goal.description && (
                         <div className="bg-gray-900 rounded-xl p-4 border border-dashed border-gray-800">
                              <p className="text-gray-400 text-sm italic">"{goal.description}"</p>
                         </div>
                     )}
 
-                    {/* Extrato / Histórico */}
                     <div>
                         <h3 className="text-white font-bold mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
                             <History size={16} className="text-gray-500"/> Histórico de Aportes
@@ -250,33 +243,72 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                                 Nenhum aporte registrado ainda.
                             </div>
                         ) : (
-                            <div className="space-y-2">
-                                {history.map((item, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-3 bg-gray-800/40 rounded-xl border border-gray-800/50 hover:bg-gray-800 transition-colors">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-lg ${item.source === 'TRANSACTION' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                                                {item.source === 'TRANSACTION' ? <TrendingUp size={16}/> : <Wallet size={16}/>}
+                            <div className="space-y-3">
+                                {history.map((item, idx) => {
+                                    const logos = getPlatformLogos(item.platform);
+                                    
+                                    return (
+                                        <div key={idx} className="flex items-center justify-between p-4 bg-gray-800/40 rounded-xl border border-gray-800/50 hover:bg-gray-800 transition-colors">
+                                            <div className="flex items-center gap-4">
+                                                {/* 1. Ícone Fixo (Seta ou Carteira) */}
+                                                <div className={`w-10 h-10 flex items-center justify-center rounded-xl overflow-hidden shrink-0 ${item.source === 'TRANSACTION' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                    {item.source === 'TRANSACTION' ? <TrendingUp size={20}/> : <Wallet size={20}/>}
+                                                </div>
+                                                
+                                                {/* 2. Detalhes com Logos Inline */}
+                                                <div>
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {/* Renderiza um ou mais logos */}
+                                                        {logos.length > 0 && logos.map((l: any) => (
+                                                            <img key={l.alt} src={l.src} alt={l.alt} className="w-5 h-5 object-contain" />
+                                                        ))}
+                                                        
+                                                        <p className="text-white font-bold text-sm">
+                                                            {item.source === 'TRANSACTION' ? 'Lucro com Corridas' : (item.description || 'Aporte Manual')}
+                                                        </p>
+                                                    </div>
+                                                    
+                                                    {/* Data e ID discreto */}
+                                                    <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                                                        {new Date(item.date).toLocaleDateString('pt-BR')} 
+                                                        {item.source === 'TRANSACTION' && (
+                                                            <span className="bg-gray-800 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-700">
+                                                                #{item.id.slice(0, 6)}
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p className="text-white font-bold text-sm">
-                                                    {item.source === 'TRANSACTION' ? 'Lucro de Corrida' : (item.description || 'Aporte Manual')}
-                                                </p>
-                                                <p className="text-xs text-gray-500">
-                                                    {new Date(item.date).toLocaleDateString('pt-BR')} 
-                                                </p>
+
+                                            {/* 3. Valores (Líquido em Destaque) */}
+                                            <div className="text-right">
+                                                {/* Valor Líquido (Real que soma na meta) */}
+                                                <span className="text-emerald-400 font-bold text-lg block leading-none">
+                                                    +{formatVal(item.amount / 100)} 
+                                                </span>
+                                                
+                                                {/* Valor Bruto (Discreto, abaixo, se existir) */}
+                                                {item.gross_amount && item.gross_amount > item.amount && (
+                                                    <span className="text-xs text-gray-500 block mt-1">
+                                                        Bruto: {formatVal(item.gross_amount / 100)}
+                                                    </span>
+                                                )}
+                                                
+                                                {/* Label visual caso não tenha bruto, para reforçar que é líquido */}
+                                                {item.source === 'TRANSACTION' && (!item.gross_amount || item.gross_amount <= item.amount) && (
+                                                    <span className="text-[10px] text-gray-600 block mt-1 uppercase font-bold tracking-wider">
+                                                        Líquido
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
-                                        <span className="text-emerald-400 font-bold text-sm">
-                                            +{formatVal(item.amount)} 
-                                        </span>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
                 </div>
 
-                {/* Footer Actions */}
                 <div className="p-4 border-t border-gray-800 bg-gray-900 flex gap-3">
                     <button 
                         onClick={() => { onClose(); onEdit(goal); }}
@@ -300,23 +332,19 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 // === PÁGINA PRINCIPAL ===
 
 export default function MetasPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Estados de UI
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error', title: string, message: string } | null>(null);
   const [goalToDeleteId, setGoalToDeleteId] = useState<string | null>(null);
   const [goalToAddAmount, setGoalToAddAmount] = useState<Goal | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null); 
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null); 
 
-  // Filtro
   const [filterVehicleId, setFilterVehicleId] = useState<string>("ALL");
-
-  // Form States
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -325,53 +353,70 @@ export default function MetasPage() {
   const [purpose, setPurpose] = useState("");
   const [deadline, setDeadline] = useState("");
 
-  // === 0. AUTH ===
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+  const mapGoalFromDB = (data: any): Goal => ({
+      id: data.id,
+      userId: data.user_id,
+      linkedVehicleIds: data.linked_vehicle_ids || [],
+      title: data.title,
+      description: data.description,
+      targetAmount: data.target_amount,
+      currentAmount: data.current_amount,
+      purpose: data.purpose,
+      deadline: data.deadline,
+      status: data.status,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+  });
+
+  const mapVehicleFromDB = (data: any): Vehicle => ({
+    id: data.id,
+    userId: data.user_id,
+    name: data.name,
+    ...data
+  });
+
+  const fetchAllData = useCallback(async (userId: string) => {
+    try {
+      const [vehiclesRes, goalsRes] = await Promise.all([
+        supabase.from("vehicles").select("*").eq("user_id", userId),
+        supabase.from("goals").select("*").eq("user_id", userId)
+      ]);
+
+      if (vehiclesRes.error) throw vehiclesRes.error;
+      if (goalsRes.error) throw goalsRes.error;
+
+      if (vehiclesRes.data) {
+          setVehicles(vehiclesRes.data.map(mapVehicleFromDB));
+      }
+      
+      if (goalsRes.data) {
+        const mappedGoals = goalsRes.data.map(mapGoalFromDB);
+        setGoals(mappedGoals.sort((a, b) => (a.status === 'COMPLETED' ? 1 : -1)));
+      }
+    } catch (error: any) {
+      console.error("Erro ao carregar dados:", error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // === 1. FETCH VEÍCULOS & METAS (REALTIME) ===
-  const fetchData = useCallback(async () => {
-      if (!user) return;
-      setLoading(true);
-
-      // Fetch Vehicles
-      const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
-      if (vData) {
-          const mappedVehicles = vData.map(v => ({...v, userId: v.user_id}));
-          setVehicles(mappedVehicles as any);
-      }
-
-      // Fetch Goals
-      const { data: gData } = await supabase.from('goals').select('*').eq('user_id', user.id);
-      if (gData) {
-          const mappedGoals = gData.map(g => ({
-              ...g,
-              userId: g.user_id,
-              targetAmount: g.target_amount,
-              currentAmount: g.current_amount,
-              linkedVehicleIds: g.linked_vehicle_ids,
-              createdAt: g.created_at,
-              updatedAt: g.updated_at
-          }));
-          setGoals(mappedGoals.sort((a, b) => (a.status === 'COMPLETED' ? 1 : -1)) as any);
-      }
-      setLoading(false);
-  }, [user]);
-
   useEffect(() => {
-      if (user) {
-          fetchData();
-          
-          // Realtime subscriptions
-          const goalsChannel = supabase.channel('realtime-goals-page')
-              .on('postgres_changes', { event: '*', schema: 'public', table: 'goals' }, () => fetchData())
-              .subscribe();
-          
-          return () => { supabase.removeChannel(goalsChannel); }
-      }
-  }, [user, fetchData]);
-
+    const init = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            setCurrentUser(user);
+            await fetchAllData(user.id);
+        } else {
+            setLoading(false);
+        }
+    };
+    init();
+    
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+        if (session?.user) setCurrentUser(session.user);
+    });
+    return () => { authListener.subscription.unsubscribe(); };
+  }, [fetchAllData]);
 
   const toggleVehicleSelection = (id: string) => {
     setSelectedVehicleIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
@@ -381,8 +426,8 @@ export default function MetasPage() {
       setEditingGoal(goal);
       setTitle(goal.title);
       setDescription(goal.description || "");
-      setTargetAmount(String(goal.targetAmount / 100)); // DB stores cents, input expects float
-      setCurrentAmount(String(goal.currentAmount / 100));
+      setTargetAmount(String(goal.targetAmount));
+      setCurrentAmount(String(goal.currentAmount));
       setPurpose(goal.purpose || "");
       setDeadline(goal.deadline || "");
       setSelectedVehicleIds(goal.linkedVehicleIds || []);
@@ -401,84 +446,95 @@ export default function MetasPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!currentUser) return;
     setIsSaving(true);
 
     try {
-      // Inputs são float (ex: 10.50), DB espera centavos (1050)
-      const targetCents = Math.round(Number(targetAmount) * 100);
-      const currentCents = Math.round(Number(currentAmount) * 100) || 0;
+      const initialCurrent = Number(currentAmount) || 0;
+      const target = Number(targetAmount);
       
-      const goalData: any = {
-        user_id: user.id,
-        linked_vehicle_ids: selectedVehicleIds, 
+      const goalDataDB: any = {
+        user_id: currentUser.id,
+        linked_vehicle_ids: selectedVehicleIds,
         title,
         description,
-        target_amount: targetCents,
-        current_amount: currentCents,
+        target_amount: target,
+        current_amount: initialCurrent,
         purpose,
         deadline: deadline || null,
-        status: currentCents >= targetCents ? 'COMPLETED' : 'ACTIVE',
+        status: initialCurrent >= target ? 'COMPLETED' : 'ACTIVE',
         updated_at: new Date().toISOString()
       };
 
+      let error;
+      
       if (!editingGoal) {
-          goalData.created_at = new Date().toISOString();
-          const { error } = await supabase.from('goals').insert(goalData);
-          if (error) throw error;
-          setFeedback({ type: 'success', title: 'Meta Criada!', message: 'Seu objetivo foi criado com sucesso. 🚀' });
+          goalDataDB.created_at = new Date().toISOString();
+          const res = await supabase.from("goals").insert(goalDataDB);
+          error = res.error;
+          if (!error) setFeedback({ type: 'success', title: 'Meta Criada!', message: 'Seu objetivo foi criado com sucesso. 🚀' });
       } else {
-          const { error } = await supabase.from('goals').update(goalData).eq('id', editingGoal.id);
-          if (error) throw error;
-          setFeedback({ type: 'success', title: 'Meta Atualizada!', message: 'As alterações foram salvas.' });
-          setEditingGoal(null);
+          const res = await supabase.from("goals").update(goalDataDB).eq("id", editingGoal.id);
+          error = res.error;
+          if (!error) {
+              setFeedback({ type: 'success', title: 'Meta Atualizada!', message: 'As alterações foram salvas.' });
+              setEditingGoal(null);
+          }
       }
       
+      if (error) throw error;
+
       resetForm();
-      setIsSaving(false);
+      await fetchAllData(currentUser.id);
 
     } catch (error: any) {
       console.error(error);
+      setFeedback({ type: 'error', title: 'Erro', message: error.message || 'Erro ao salvar' });
+    } finally {
       setIsSaving(false);
-      setFeedback({ type: 'error', title: 'Erro', message: 'Erro ao salvar meta.' });
     }
   };
 
   const handleDeleteConfirm = async () => {
-    if (goalToDeleteId) {
-      await supabase.from('goals').delete().eq('id', goalToDeleteId);
-      setGoalToDeleteId(null);
+    if (goalToDeleteId && currentUser) {
+      try {
+          const { error } = await supabase.from("goals").delete().eq("id", goalToDeleteId);
+          if (error) throw error;
+          setGoalToDeleteId(null);
+          await fetchAllData(currentUser.id);
+      } catch (error: any) {
+          setFeedback({ type: 'error', title: 'Erro', message: error.message });
+      }
     }
   };
 
-  // Função Auxiliar para registrar transação de aporte manual
   const registerDeposit = async (goal: Goal, amountVal: number) => {
-      if (!user) return;
+      if (!currentUser) return;
       
-      const amountCents = Math.round(amountVal * 100);
-
-      // 1. Cria transação de "Ganho" (INCOME) vinculada à meta
-      const { error: txError } = await supabase.from('transactions').insert({
-          user_id: user.id,
+      const { error: txError } = await supabase.from("transactions").insert({
+          user_id: currentUser.id,
+          vehicle_id: null, 
           linked_goal_id: goal.id,
-          amount: amountCents,
+          amount: Math.round(amountVal * 100),
           date: new Date().toISOString(),
-          type: 'INCOME', // Usamos INCOME para aportes
+          type: 'DEPOSIT', 
           description: 'Aporte Manual',
-          platform: 'PARTICULAR', 
+          platform: Platform.PARTICULAR,
           created_at: new Date().toISOString()
       });
 
       if (txError) throw txError;
 
-      // 2. Atualiza saldo da meta (Supabase não tem increment atômico fácil via JS client, então calculamos)
-      const newCurrent = goal.currentAmount + amountCents;
+      const newCurrent = goal.currentAmount + amountVal;
       const newStatus = newCurrent >= goal.targetAmount ? 'COMPLETED' : 'ACTIVE';
       
-      await supabase.from('goals').update({ 
+      const { error: goalError } = await supabase.from("goals").update({ 
           current_amount: newCurrent, 
           status: newStatus 
-      }).eq('id', goal.id);
+      }).eq("id", goal.id);
+
+      if (goalError) throw goalError;
+      await fetchAllData(currentUser.id);
   };
 
   const handleManualAdd = async (val: number) => {
@@ -488,8 +544,7 @@ export default function MetasPage() {
               setGoalToAddAmount(null);
               setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados à meta.` });
           } catch (error: any) {
-              console.error(error);
-              setFeedback({ type: 'error', title: 'Erro', message: 'Falha ao registrar aporte.' });
+              setFeedback({ type: 'error', title: 'Erro', message: error.message });
           }
       }
   };
@@ -499,12 +554,11 @@ export default function MetasPage() {
           await registerDeposit(goal, val);
           setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados.` });
       } catch (error: any) {
-          console.error(error);
-          setFeedback({ type: 'error', title: 'Erro', message: 'Falha ao registrar aporte.' });
+          setFeedback({ type: 'error', title: 'Erro', message: error.message });
       }
   };
 
-  const formatMoney = (val: number) => (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatMoney = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const getProgress = (current: number, target: number) => Math.min(100, (current / target) * 100);
 
   const displayedGoals = goals.filter(g => {
@@ -515,8 +569,6 @@ export default function MetasPage() {
 
   return (
     <div className="pb-20 animate-fade-in max-w-7xl mx-auto px-4">
-      
-      {/* MODAIS GLOBAIS */}
       <FeedbackModal isOpen={!!feedback} onClose={() => setFeedback(null)} type={feedback?.type} title={feedback?.title} message={feedback?.message} />
       <ConfirmModal isOpen={!!goalToDeleteId} onClose={() => setGoalToDeleteId(null)} onConfirm={handleDeleteConfirm} title="Excluir Meta?" message="Isso apagará todo o histórico deste objetivo." />
       <InputModal isOpen={!!goalToAddAmount} onClose={() => setGoalToAddAmount(null)} onConfirm={handleManualAdd} title="Adicionar Aporte Manual" />
@@ -537,7 +589,6 @@ export default function MetasPage() {
           </h1>
           <p className="text-gray-400 mt-1">Defina seus sonhos e acompanhe seu progresso.</p>
         </div>
-        
         <div className="bg-gray-900 border border-gray-800 p-1.5 rounded-xl flex items-center gap-2">
            <Filter size={16} className="text-gray-500 ml-2"/>
            <select value={filterVehicleId} onChange={e => setFilterVehicleId(e.target.value)} className="bg-transparent text-sm text-white font-medium outline-none p-1 cursor-pointer">
@@ -549,7 +600,6 @@ export default function MetasPage() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* FORMULÁRIO */}
         <div className="lg:col-span-1">
           <div className={`p-6 rounded-2xl border sticky top-4 shadow-xl transition-colors ${editingGoal ? 'bg-purple-900/10 border-purple-500/30' : 'bg-gray-900 border-gray-800'}`}>
             <h2 className={`text-xl font-semibold mb-5 flex items-center gap-2 ${editingGoal ? 'text-purple-400' : 'text-emerald-500'}`}>
@@ -558,8 +608,6 @@ export default function MetasPage() {
             </h2>
             
             <form onSubmit={handleSave} className="space-y-4">
-              
-              {/* SELEÇÃO DE VEÍCULOS */}
               <div>
                 <label className="block text-xs uppercase font-bold text-gray-500 mb-2">Vincular a Veículos (Opcional)</label>
                 <div className="flex flex-wrap gap-2">
@@ -573,11 +621,7 @@ export default function MetasPage() {
                     )
                   })}
                 </div>
-                {selectedVehicleIds.length === 0 && (
-                    <div className="flex items-center gap-1 mt-2 text-gray-500 text-xs italic">
-                        <Info size={12} /> Nenhum selecionado (Meta Geral)
-                    </div>
-                )}
+                {selectedVehicleIds.length === 0 && <div className="flex items-center gap-1 mt-2 text-gray-500 text-xs italic"><Info size={12} /> Nenhum selecionado (Meta Geral)</div>}
               </div>
 
               <div>
@@ -616,9 +660,7 @@ export default function MetasPage() {
 
               <div className="flex gap-2">
                   {editingGoal && (
-                      <button type="button" onClick={handleCancelEdit} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3.5 rounded-xl mt-2 transition-all">
-                          Cancelar
-                      </button>
+                      <button type="button" onClick={handleCancelEdit} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3.5 rounded-xl mt-2 transition-all">Cancelar</button>
                   )}
                   <button type="submit" disabled={isSaving} className={`flex-1 bg-gradient-to-r ${editingGoal ? 'from-purple-600 to-indigo-600' : 'from-emerald-600 to-teal-600'} hover:opacity-90 text-white font-bold py-3.5 rounded-xl mt-2 transition-all shadow-lg flex justify-center gap-2`}>
                     {isSaving ? "Salvando..." : editingGoal ? "Atualizar Meta" : "Traçar Meta"}
@@ -628,7 +670,6 @@ export default function MetasPage() {
           </div>
         </div>
 
-        {/* LISTA DE METAS */}
         <div className="lg:col-span-2 space-y-4">
           {loading ? (
             <p className="text-gray-500 animate-pulse text-center mt-10">Buscando seus sonhos...</p>
@@ -641,24 +682,17 @@ export default function MetasPage() {
             displayedGoals.map((goal) => {
               const progress = getProgress(goal.currentAmount, goal.targetAmount);
               const isCompleted = goal.status === 'COMPLETED';
-              const linkedCarNames = vehicles
-                  .filter(v => goal.linkedVehicleIds?.includes(v.id))
-                  .map(v => v.name);
+              const linkedCarNames = vehicles.filter(v => goal.linkedVehicleIds?.includes(v.id)).map(v => v.name);
               
               return (
-                <div 
-                    key={goal.id} 
-                    onClick={() => setSelectedGoal(goal)} 
-                    className={`relative bg-gray-900 rounded-2xl border p-6 transition-all group hover:border-gray-500 cursor-pointer ${isCompleted ? 'border-emerald-500/30 bg-emerald-900/5' : 'border-gray-800'}`}
-                >
+                <div key={goal.id} onClick={() => setSelectedGoal(goal)} className={`relative bg-gray-900 rounded-2xl border p-6 transition-all group hover:border-gray-500 cursor-pointer ${isCompleted ? 'border-emerald-500/30 bg-emerald-900/5' : 'border-gray-800'}`}>
                   {isCompleted && <div className="absolute inset-0 bg-emerald-500/5 blur-xl rounded-2xl -z-10"></div>}
-
                   <div className="flex justify-between items-start mb-6">
                     <div className="flex gap-4 items-center">
-                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${isCompleted ? 'bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-gray-800 text-purple-400 shadow-purple-900/10'}`}>
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${isCompleted ? 'bg-emerald-500 text-white shadow-emerald-900/20' : 'bg-gray-800 text-purple-400 shadow-purple-900/10'}`}>
                           {isCompleted ? <Trophy size={28} /> : <Target size={28} />}
-                       </div>
-                       <div>
+                        </div>
+                        <div>
                           <h3 className="text-xl font-bold text-white group-hover:text-purple-400 transition-colors flex items-center gap-2">
                               {goal.title}
                               <ArrowRight size={16} className="opacity-0 -ml-2 group-hover:opacity-100 group-hover:ml-0 transition-all text-purple-500"/>
@@ -666,81 +700,49 @@ export default function MetasPage() {
                           <div className="flex flex-wrap items-center gap-2 text-xs mt-1 text-gray-500">
                              <span className="uppercase tracking-wider font-bold">{goal.purpose}</span>
                              {goal.deadline && (
-                               <span className="flex items-center gap-1 border-l border-gray-700 pl-2">
-                                 <Calendar size={12}/> {new Date(goal.deadline).toLocaleDateString('pt-BR')}
-                               </span>
+                               <span className="flex items-center gap-1 border-l border-gray-700 pl-2"><Calendar size={12}/> {new Date(goal.deadline).toLocaleDateString('pt-BR')}</span>
                              )}
                           </div>
-                          
-                          {/* Tags de Veículos no Card */}
                           <div className="flex flex-wrap gap-1 mt-2">
                             {linkedCarNames.length > 0 ? (
                                 linkedCarNames.map((name, idx) => (
-                                    <span key={idx} className="bg-blue-900/20 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold flex items-center gap-1">
-                                        <Car size={10}/> {name}
-                                    </span>
+                                    <span key={idx} className="bg-blue-900/20 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold flex items-center gap-1"><Car size={10}/> {name}</span>
                                 ))
                             ) : (
                                 <span className="text-gray-600 text-[10px] bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700">Geral</span>
                             )}
                           </div>
-                       </div>
+                        </div>
                     </div>
                   </div>
-                  
-                  {/* Descrição Visível no Card */}
-                  {goal.description && (
-                      <p className="text-gray-400 text-sm mb-4 leading-relaxed line-clamp-2">{goal.description}</p>
-                  )}
-                  
-                  {/* Visualização de Progresso */}
+                  {goal.description && <p className="text-gray-400 text-sm mb-4 leading-relaxed line-clamp-2">{goal.description}</p>}
                   <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 mb-2">
                       <div className="flex justify-between items-end mb-2">
                           <div className="flex flex-col">
                              <span className="text-[10px] uppercase text-gray-500 font-bold mb-1">Alcançado</span>
-                             <span className={`text-2xl font-bold ${isCompleted ? 'text-emerald-400' : 'text-white'}`}>
-                                 {formatMoney(goal.currentAmount)}
-                             </span>
+                             <span className={`text-2xl font-bold ${isCompleted ? 'text-emerald-400' : 'text-white'}`}>{formatMoney(goal.currentAmount)}</span>
                           </div>
                           <div className="flex flex-col items-end">
                              <span className="text-[10px] uppercase text-gray-500 font-bold mb-1">Meta</span>
-                             <span className="text-lg font-medium text-gray-400">
-                                 {formatMoney(goal.targetAmount)}
-                             </span>
+                             <span className="text-lg font-medium text-gray-400">{formatMoney(goal.targetAmount)}</span>
                           </div>
                       </div>
                       <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-1000 ${isCompleted ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-600 to-purple-600'}`} style={{ width: `${progress}%` }}></div>
                       </div>
                   </div>
-
-                  {/* Barra de Ações Rápidas (Restaurada e Integrada ao Histórico) */}
                   {!isCompleted && (
                     <div className="flex gap-2 mt-4 pt-4 border-t border-gray-800">
                         <p className="text-[10px] text-gray-500 self-center mr-auto uppercase font-bold hidden sm:block">Aportar:</p>
                         {[50, 100, 500].map(val => (
-                            <button 
-                                key={val} 
-                                onClick={(e) => { e.stopPropagation(); handleQuickAdd(goal, val); }} 
-                                className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600 hover:text-white text-emerald-500 text-xs font-bold border border-gray-700 transition-all flex items-center gap-1 shadow-sm active:scale-95"
-                            >
+                            <button key={val} onClick={(e) => { e.stopPropagation(); handleQuickAdd(goal, val); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600 hover:text-white text-emerald-500 text-xs font-bold border border-gray-700 transition-all flex items-center gap-1 shadow-sm active:scale-95">
                                 <TrendingUp size={12}/> +{val}
                             </button>
                         ))}
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); setGoalToAddAmount(goal); }} 
-                            className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold border border-gray-700 transition-all active:scale-95"
-                        >
-                            Outro
-                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setGoalToAddAmount(goal); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold border border-gray-700 transition-all active:scale-95">Outro</button>
                     </div>
                   )}
-                  
-                  {isCompleted && (
-                    <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold justify-center bg-emerald-500/10 rounded-lg py-2 mt-4 border border-emerald-500/20">
-                       <CheckCircle2 size={16} /> Meta Conquistada!
-                    </div>
-                  )}
+                  {isCompleted && <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold justify-center bg-emerald-500/10 rounded-lg py-2 mt-4 border border-emerald-500/20"><CheckCircle2 size={16} /> Meta Conquistada!</div>}
                 </div>
               );
             })
