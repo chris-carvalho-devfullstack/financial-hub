@@ -6,14 +6,22 @@ import {
   Calendar, Wrench, Fuel, TrendingUp, Filter, 
   Car, MapPin, ArrowDownCircle, Route, Flag,
   Gauge, Droplets, DollarSign, Timer, Navigation,
-  Target, Trophy, CheckCircle2, CalendarDays, Clock
+  Target, Trophy, CheckCircle2, CalendarDays, Clock,
+  Layers, Briefcase, Map as MapIcon, Globe, Hash
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
-import type { Vehicle, Transaction, ExpenseTransaction, FuelTransaction, IncomeTransaction } from "~/types/models";
-import { ExpenseCategory } from "~/types/enums";
+import { ExpenseCategory, Platform } from "~/types/enums";
 import type { User } from "@supabase/supabase-js";
 
-// === TYPES LOCAIS ===
+// === TYPES ===
+interface PlatformConfigItem {
+  label: string;
+  logo?: string;
+  icon?: React.ReactElement; // Tipagem mais específica para evitar erro no cloneElement
+  bg: string;
+  color: string;
+}
+
 type TimelineEventType = 'TRANSACTION' | 'GOAL_CREATED' | 'GOAL_REACHED';
 
 interface TimelineItem {
@@ -24,37 +32,42 @@ interface TimelineItem {
   sortDate: number;
 }
 
-interface Goal {
-  id: string;
-  title: string;
-  target_amount: number;
-  current_amount: number;
-  deadline?: string;
-  created_at: string;
-  status: 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
-  achieved_at?: string;
-  user_id: string;
-}
-
-// === UTILITÁRIOS ===
-const formatMoney = (val: number) => 
-  (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-const formatNumber = (val: number) => 
-  val.toLocaleString('pt-BR');
-
-const formatDate = (dateString: string) => {
-  if (!dateString) return '--/--';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+// === CONFIGURAÇÕES ===
+const PLATFORM_CONFIG: Record<string, PlatformConfigItem> = {
+  [Platform.UBER]: { label: 'Uber', logo: '/logos/uber.png', bg: 'bg-black', color: 'text-white' },
+  [Platform.NINETY_NINE]: { label: '99', logo: '/logos/99.png', bg: 'bg-yellow-400', color: 'text-black' },
+  [Platform.IFOOD]: { label: 'iFood', logo: '/logos/ifood.png', bg: 'bg-red-500', color: 'text-white' },
+  [Platform.INDRIVER]: { label: 'InDrive', logo: '/logos/indriver.png', bg: 'bg-green-500', color: 'text-white' },
+  'ZE_DELIVERY': { label: 'Zé Delivery', logo: '/logos/ze-delivery.png', bg: 'bg-yellow-500', color: 'text-black' },
+  [Platform.PARTICULAR]: { label: 'Particular', icon: <Briefcase size={20}/>, bg: 'bg-blue-600', color: 'text-white' },
+  'MULTIPLE': { label: 'Múltiplos Apps', icon: <Layers size={20}/>, bg: 'bg-indigo-600', color: 'text-white' }
 };
 
-const formatTimeDuration = (minutes: number) => {
-  if (!minutes) return "0min";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}min`;
+const FUEL_TRANSLATIONS: Record<string, string> = {
+  'GASOLINE': 'Gasolina',
+  'ETHANOL': 'Etanol',
+  'DIESEL': 'Diesel',
+  'CNG': 'GNV',
+  'ELECTRIC': 'Elétrico'
+};
+
+// === UTILITÁRIOS ===
+
+// Para Transações (geralmente salvas em centavos: 120000 = R$ 1.200,00)
+const formatCurrencyCents = (val: number) => 
+  (val / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Para Metas (geralmente salvas em valor bruto: 1200 = R$ 1.200,00)
+const formatCurrencyRaw = (val: number) => 
+  val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+const formatNumber = (val: number) => 
+  val ? val.toLocaleString('pt-BR') : '0';
+
+const formatTime = (dateString: string) => {
+  if (!dateString) return '--:--';
+  const date = new Date(dateString);
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
 const getMonthYear = (dateString: string) => {
@@ -63,15 +76,13 @@ const getMonthYear = (dateString: string) => {
   return str.charAt(0).toUpperCase() + str.slice(1);
 };
 
-const getAppLogo = (text?: string | null) => {
-  if (!text) return null;
-  const lower = text.toLowerCase();
-  if (lower.includes('uber')) return '/logos/uber.png';
-  if (lower.includes('99')) return '/logos/99.png';
-  if (lower.includes('indriver') || lower.includes('in-driver')) return '/logos/indriver.png';
-  if (lower.includes('ifood')) return '/logos/ifood.png';
-  if (lower.includes('zé') || lower.includes('ze delivery')) return '/logos/ze-delivery.png';
-  return null; 
+// Função auxiliar com tipagem correta para o TypeScript
+const cloneIcon = (icon: React.ReactElement | undefined, size: number) => {
+  if (React.isValidElement(icon)) {
+    // Casting explícito para dizer ao TS que este elemento aceita 'size'
+    return React.cloneElement(icon as React.ReactElement<{ size?: number }>, { size });
+  }
+  return icon;
 };
 
 // === SKELETON ===
@@ -79,8 +90,8 @@ function TimelineSkeleton() {
   return (
     <div className="space-y-8 animate-pulse mt-8">
       {[1, 2, 3].map((i) => (
-        <div key={i} className="relative md:pl-24 flex gap-4">
-          <div className="hidden md:block absolute left-9 top-0 w-10 h-10 -ml-3.5 rounded-full bg-gray-800 border-4 border-gray-900 z-10" />
+        <div key={i} className="relative md:pl-28 flex gap-4">
+          <div className="hidden md:block absolute left-14 top-0 w-10 h-10 -ml-5 rounded-full bg-gray-800 border-4 border-gray-900 z-10" />
           <div className="md:hidden flex flex-col items-center min-w-[3.5rem] gap-2 pt-1">
             <div className="h-4 w-6 bg-gray-800 rounded" />
             <div className="h-full w-0.5 bg-gray-800 rounded-full" />
@@ -98,39 +109,28 @@ function TimelineSkeleton() {
 // === PÁGINA PRINCIPAL ===
 export default function TimelinePage() {
   const [user, setUser] = useState<User | null>(null);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
   const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'ALL' | 'INCOME' | 'EXPENSE' | 'FUEL' | 'MAINTENANCE'>('ALL');
 
-  // 0. Auth
+  // Auth
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => subscription.unsubscribe();
   }, []);
 
-  // 1. Veículos
+  // Veículos
   const fetchVehicles = useCallback(async () => {
     if (!user) return;
     const { data: vData } = await supabase.from('vehicles').select('*').eq('user_id', user.id);
 
     if (vData) {
-      const mappedVehicles = vData.map((v: any) => ({
-        ...v,
-        userId: v.user_id,
-        currentOdometer: v.current_odometer,
-        fuelTypes: v.tanks ? v.tanks.flatMap((t: any) => t.fuelTypes) : []
-      }));
-      setVehicles(mappedVehicles as any);
-
-      if (mappedVehicles.length > 0 && !selectedVehicleId) {
+      setVehicles(vData);
+      if (vData.length > 0 && !selectedVehicleId) {
         const { data: pData } = await supabase.from('profiles').select('last_selected_vehicle_id').eq('id', user.id).single();
         if (pData?.last_selected_vehicle_id) setSelectedVehicleId(pData.last_selected_vehicle_id);
-        else setSelectedVehicleId(mappedVehicles[0].id);
+        else setSelectedVehicleId(vData[0].id);
       }
     }
   }, [user, selectedVehicleId]);
@@ -145,20 +145,18 @@ export default function TimelinePage() {
     }
   }, [user, fetchVehicles]);
 
-  // 2. Dados
+  // Dados
   const fetchData = useCallback(async () => {
     if (!selectedVehicleId || !user) return;
     setLoading(true);
 
     try {
-      // Transações
       const { data: transData } = await supabase
         .from('transactions')
         .select('*')
         .eq('vehicle_id', selectedVehicleId)
         .order('date', { ascending: false });
 
-      // Metas
       const { data: goalsData } = await supabase
         .from('goals')
         .select('*')
@@ -167,30 +165,27 @@ export default function TimelinePage() {
       let items: TimelineItem[] = [];
 
       if (transData) {
-        const mappedTrans = transData.map(t => ({
-          ...t,
-          userId: t.user_id,
-          vehicleId: t.vehicle_id,
-          fuelType: t.fuel_type,
-          stationName: t.station_name,
-          pricePerLiter: t.price_per_liter,
-          fullTank: t.is_full_tank,
-          distanceDriven: t.distance_driven,
-          isFixedCost: t.is_fixed_cost
-        }));
-
-        const tItems: TimelineItem[] = mappedTrans.map((t: any) => ({
+        const tItems: TimelineItem[] = transData.map((t: any) => ({
           id: t.id,
           date: t.date,
           type: 'TRANSACTION',
-          data: t,
+          data: {
+            ...t,
+            distanceDriven: t.distance || t.distance_driven || 0,
+            odometer: t.odometer || 0,
+            stationName: t.station_name,
+            liters: t.liters,
+            fullTank: t.is_full_tank,
+            fuelType: t.fuel_type,
+            split: t.split 
+          },
           sortDate: new Date(t.date).getTime()
         }));
         items = [...items, ...tItems];
       }
 
       if (goalsData) {
-        goalsData.forEach((g: Goal) => {
+        goalsData.forEach((g: any) => {
           items.push({
             id: `goal-created-${g.id}`,
             date: g.created_at,
@@ -199,8 +194,8 @@ export default function TimelinePage() {
             sortDate: new Date(g.created_at).getTime()
           });
 
-          if (g.status === 'COMPLETED' || (g.achieved_at)) {
-             const dateAchieved = g.achieved_at || g.deadline || new Date().toISOString(); 
+          if (g.status === 'COMPLETED' || g.achieved_at) {
+             const dateAchieved = g.achieved_at || g.updated_at || new Date().toISOString(); 
              items.push({
                id: `goal-reached-${g.id}`,
                date: dateAchieved,
@@ -233,22 +228,17 @@ export default function TimelinePage() {
     }
   }, [selectedVehicleId, fetchData]);
 
-  const handleVehicleChange = async (id: string) => {
-    setSelectedVehicleId(id);
-    if (user) await supabase.from('profiles').update({ last_selected_vehicle_id: id }).eq('id', user.id);
-  };
-
-  // 3. Agrupamento
+  // Agrupamento
   const groupedItems = useMemo(() => {
     const filtered = timelineItems.filter(item => {
       if (item.type !== 'TRANSACTION') return true; 
       
-      const t = item.data as Transaction;
+      const t = item.data;
       if (filterType === 'ALL') return true;
       if (filterType === 'INCOME') return t.type === 'INCOME';
-      if (filterType === 'EXPENSE') return t.type === 'EXPENSE' && (t as ExpenseTransaction).category !== ExpenseCategory.FUEL;
-      if (filterType === 'FUEL') return t.type === 'EXPENSE' && (t as ExpenseTransaction).category === ExpenseCategory.FUEL;
-      if (filterType === 'MAINTENANCE') return t.type === 'EXPENSE' && (t as ExpenseTransaction).category === ExpenseCategory.MAINTENANCE;
+      if (filterType === 'EXPENSE') return t.type === 'EXPENSE' && t.category !== ExpenseCategory.FUEL;
+      if (filterType === 'FUEL') return t.type === 'EXPENSE' && t.category === ExpenseCategory.FUEL;
+      if (filterType === 'MAINTENANCE') return t.type === 'EXPENSE' && t.category === ExpenseCategory.MAINTENANCE;
       return true;
     });
 
@@ -260,9 +250,13 @@ export default function TimelinePage() {
     }, {} as Record<string, TimelineItem[]>);
   }, [timelineItems, filterType]);
 
-  // === ESTILOS POR TIPO ===
+  // Helper para buscar nome do veículo
+  const getVehicleName = (vehicleId: string) => {
+    const vehicle = vehicles.find(v => v.id === vehicleId);
+    return vehicle ? vehicle.name : 'Veículo';
+  };
+
   const getItemStyles = (item: TimelineItem) => {
-    // METAS
     if (item.type === 'GOAL_CREATED') {
        return {
          bg: "bg-indigo-900/20",
@@ -284,8 +278,7 @@ export default function TimelinePage() {
        };
     }
 
-    // TRANSAÇÕES
-    const t = item.data as Transaction;
+    const t = item.data;
     if (t.type === 'INCOME') {
       return {
         bg: "bg-emerald-900/20",
@@ -297,8 +290,7 @@ export default function TimelinePage() {
       };
     }
     
-    const exp = t as ExpenseTransaction;
-    if (exp.category === ExpenseCategory.FUEL) {
+    if (t.category === ExpenseCategory.FUEL) {
       return {
         bg: "bg-yellow-900/20",
         border: "border-yellow-500/30",
@@ -309,7 +301,7 @@ export default function TimelinePage() {
       };
     }
     
-    if (exp.category === ExpenseCategory.MAINTENANCE) {
+    if (t.category === ExpenseCategory.MAINTENANCE) {
       return {
         bg: "bg-blue-900/20",
         border: "border-blue-500/30",
@@ -333,16 +325,15 @@ export default function TimelinePage() {
   return (
     <div className="min-h-screen pb-[calc(6rem+env(safe-area-inset-bottom))] bg-gray-950">
       
-      {/* HEADER FIXO */}
       <div className="bg-gray-900/80 backdrop-blur-md border-b border-gray-800 sticky top-0 z-30 p-4 shadow-2xl">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 max-w-5xl mx-auto">
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Route className="text-emerald-500" /> Diário de Bordo
+            <Route className="text-emerald-500" /> Linha do Tempo
           </h1>
           <div className="flex w-full md:w-auto gap-3">
             <div className="relative flex-1 md:w-64">
               <Car className="absolute left-3 top-3 text-gray-500" size={16} />
-              <select value={selectedVehicleId} onChange={(e) => handleVehicleChange(e.target.value)} className="w-full pl-10 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 outline-none appearance-none">
+              <select value={selectedVehicleId} onChange={(e) => { setSelectedVehicleId(e.target.value); supabase.from('profiles').update({ last_selected_vehicle_id: e.target.value }).eq('id', user?.id); }} className="w-full pl-10 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 outline-none appearance-none">
                 {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </div>
@@ -350,9 +341,9 @@ export default function TimelinePage() {
               <Filter className="absolute left-3 top-3 text-gray-500" size={16} />
               <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="w-full pl-10 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 outline-none appearance-none">
                 <option value="ALL">Tudo</option>
+                <option value="INCOME">Receitas</option>
                 <option value="FUEL">Abastecimentos</option>
                 <option value="MAINTENANCE">Manutenções</option>
-                <option value="INCOME">Ganhos</option>
               </select>
             </div>
           </div>
@@ -366,16 +357,16 @@ export default function TimelinePage() {
         ) : (
           <div className="relative space-y-12">
             
-            {/* LINHA DE FUNDO */}
-            <div className="absolute left-8 md:left-9 top-5 bottom-8 w-3 bg-gray-800 rounded-full hidden md:block shadow-inner border border-gray-700/50 z-0">
+            {/* LINHA DE FUNDO CENTRALIZADA */}
+            {/* Mobile: Centralizado na div de data. Desktop: Centralizado no ícone (left-14) */}
+            <div className="absolute left-[1.75rem] md:left-14 top-5 bottom-8 w-1 -translate-x-1/2 bg-gray-800 rounded-full shadow-inner border border-gray-700/50 z-0">
                 <div className="w-full h-full border-l border-dashed border-gray-600/30 mx-auto w-0"></div>
             </div>
 
             {Object.entries(groupedItems).map(([month, items]) => (
               <div key={month} className="relative animate-fade-in-up z-10">
                 
-                {/* MÊS */}
-                <div className="sticky top-24 z-20 mb-8 flex justify-center md:justify-start md:pl-20 pointer-events-none">
+                <div className="sticky top-24 z-20 mb-8 flex justify-center md:justify-start md:pl-28 pointer-events-none">
                    <div className="bg-gray-800/90 backdrop-blur border border-gray-600 text-emerald-400 px-6 py-1.5 rounded-lg text-sm font-bold shadow-lg uppercase tracking-wider flex items-center gap-2">
                       <Calendar size={14} /> {month}
                    </div>
@@ -385,36 +376,48 @@ export default function TimelinePage() {
                   {items.map((item) => {
                     const styles = getItemStyles(item);
                     
-                    const t = item.type === 'TRANSACTION' ? (item.data as Transaction) : null;
-                    const g = (item.type === 'GOAL_CREATED' || item.type === 'GOAL_REACHED') ? (item.data as Goal) : null;
+                    const t = item.type === 'TRANSACTION' ? item.data : null;
+                    const g = (item.type === 'GOAL_CREATED' || item.type === 'GOAL_REACHED') ? item.data : null;
                     
-                    const isFuel = t?.type === 'EXPENSE' && (t as ExpenseTransaction).category === ExpenseCategory.FUEL;
-                    const fuelData = isFuel ? (t as FuelTransaction) : null;
+                    const isFuel = t?.category === ExpenseCategory.FUEL;
                     const isIncome = t?.type === 'INCOME';
-                    const incomeData = isIncome ? (t as IncomeTransaction) : null;
+                    const isGoalCreated = item.type === 'GOAL_CREATED';
 
-                    const appLogo = isIncome ? getAppLogo(t?.description) : null;
+                    let platformConfig: PlatformConfigItem | null = null;
+                    let splitPlatforms: PlatformConfigItem[] = [];
+                    
+                    if (isIncome) {
+                        if (t.platform === 'MULTIPLE' && t.split) {
+                            platformConfig = PLATFORM_CONFIG['MULTIPLE'];
+                            splitPlatforms = t.split.map((s: any) => PLATFORM_CONFIG[s.platform] || PLATFORM_CONFIG['PARTICULAR']);
+                        } else {
+                            platformConfig = PLATFORM_CONFIG[t.platform] || PLATFORM_CONFIG['PARTICULAR'];
+                        }
+                    }
+
+                    // Checa vínculo da meta
+                    const linkedIds = g?.linked_vehicle_ids || []; // Array
+                    const isGoalGeneral = linkedIds.length === 0;
+                    const goalVehicleName = !isGoalGeneral ? getVehicleName(linkedIds[0]) : null;
 
                     return (
-                      <div key={item.id} className="relative md:pl-24 flex gap-4 group">
+                      <div key={item.id} className="relative md:pl-28 flex gap-4 group">
                         
-                        {/* ÍCONE LATERAL */}
+                        {/* ÍCONE LATERAL - Centralizado em md:left-14 */}
                         <div className={`
-                            hidden md:flex absolute left-9 top-0 w-10 h-10 -ml-3.5 rounded-full border-4 border-gray-900 z-10 
+                            hidden md:flex absolute left-14 top-0 w-10 h-10 -ml-5 rounded-full border-4 border-gray-900 z-10 
                             items-center justify-center transition-transform duration-300 group-hover:scale-110 
                             ${styles.bubble}
                         `}>
                             {styles.icon}
                         </div>
 
-                        {/* DATA MOBILE */}
-                        <div className="md:hidden flex flex-col items-center min-w-[3.5rem] pt-1">
+                        {/* DATA MOBILE - Centralizada na linha */}
+                        <div className="md:hidden flex flex-col items-center min-w-[3.5rem] pt-1 z-10 bg-gray-950 py-2">
                            <span className="text-lg font-bold text-gray-300">{new Date(item.date).getDate()}</span>
                            <span className="text-[10px] text-gray-500 uppercase font-bold">{new Date(item.date).toLocaleDateString('pt-BR', { weekday: 'short' }).slice(0,3)}</span>
-                           <div className="h-full w-0.5 bg-gray-800 mt-2 rounded-full"></div>
                         </div>
 
-                        {/* CARD */}
                         <div className="flex-1">
                            <div className={`
                               relative p-5 rounded-xl border transition-all duration-200 
@@ -431,142 +434,165 @@ export default function TimelinePage() {
                                 <div className={`absolute inset-0 ${styles.cardBg}`}></div>
                              </div>
 
-                             {/* CONTEÚDO */}
                              <div className="flex justify-between items-start gap-3">
                                 <div className="flex items-start gap-3 flex-1">
                                    
-                                   {/* Ícone Mobile */}
-                                   <div className={`md:hidden p-2 rounded-lg bg-black/20 shrink-0`}>
-                                      {React.cloneElement(styles.icon as any, { size: 16 })}
+                                   <div className={`md:hidden p-2 rounded-lg bg-black/20 shrink-0 ${isIncome ? 'hidden' : 'block'}`}>
+                                      {cloneIcon(styles.icon, 16)}
                                    </div>
 
+                                   {isIncome && platformConfig && (
+                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm overflow-hidden ${platformConfig.bg}`}>
+                                        {platformConfig.logo ? (
+                                            <img src={platformConfig.logo} alt="App" className="w-full h-full object-cover" />
+                                        ) : (
+                                            platformConfig.icon
+                                        )}
+                                     </div>
+                                   )}
+
                                    <div className="flex-1 min-w-0">
-                                      {/* Título + Logo App */}
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <h3 className="font-bold text-gray-100 text-lg leading-tight truncate">
+                                      <div className="flex flex-col">
+                                        <h3 className="font-bold text-gray-100 text-lg leading-tight truncate flex items-center gap-2">
                                             {g ? (
-                                              item.type === 'GOAL_CREATED' ? 'Nova Meta Definida' : 'Meta Conquistada!'
+                                              item.type === 'GOAL_CREATED' ? 'Meta Criada' : 'Meta Conquistada!'
                                             ) : (
                                               isFuel ? 'Abastecimento' : isIncome ? 'Receita Recebida' : (t?.description || 'Despesa')
                                             )}
+                                            
+                                            {isIncome && splitPlatforms.length > 0 && (
+                                                <div className="flex -space-x-1.5 ml-2">
+                                                    {splitPlatforms.map((p, idx) => (
+                                                        <div key={idx} className={`w-5 h-5 rounded-full border border-gray-800 flex items-center justify-center overflow-hidden ${p.bg}`}>
+                                                            {p.logo ? <img src={p.logo} alt="" className="w-full h-full object-cover"/> : <Briefcase size={10} className="text-white"/>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </h3>
-                                        {/* LOGO DO APP (Miniatura) */}
-                                        {appLogo && (
-                                          <img src={appLogo} alt="App" className="w-5 h-5 rounded-full object-cover border border-white/10" />
-                                        )}
                                       </div>
 
-                                      {/* Subtítulo: Datas e Descrições */}
-                                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                         <span className="text-xs text-gray-400 bg-black/20 px-2 py-0.5 rounded font-mono border border-white/5">
-                                            {formatDate(item.date)}
+                                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                                         <span className="text-xs text-gray-400 bg-black/20 px-2 py-0.5 rounded font-mono border border-white/5 flex items-center gap-1">
+                                            <Clock size={10} /> {formatTime(item.date)}
                                          </span>
 
                                          {g && (
-                                           <span className="text-xs text-gray-300 flex items-center gap-1">
-                                              {g.title}
-                                           </span>
+                                           <>
+                                             <span className="text-sm text-gray-200 font-bold flex items-center gap-1">
+                                                {g.title}
+                                             </span>
+                                             {/* TAG: GERAL OU VEÍCULO */}
+                                             <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${
+                                                 isGoalGeneral 
+                                                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' 
+                                                    : 'bg-orange-500/20 text-orange-300 border-orange-500/30'
+                                             }`}>
+                                                {isGoalGeneral ? (
+                                                    <span className="flex items-center gap-1"><Globe size={8}/> Geral</span>
+                                                ) : (
+                                                    <span className="flex items-center gap-1"><Car size={8}/> {goalVehicleName}</span>
+                                                )}
+                                             </span>
+                                           </>
                                          )}
 
-                                         {isFuel && fuelData?.stationName && (
-                                            <span className="text-xs flex items-center gap-1 text-yellow-500/80 truncate">
-                                               <MapPin size={12}/> {fuelData.stationName}
+                                         {isFuel && t?.stationName && (
+                                            <span className="text-xs flex items-center gap-1 text-yellow-500/90 font-bold truncate">
+                                               <MapPin size={12}/> {t.stationName}
                                             </span>
                                          )}
                                       </div>
 
-                                      {/* === METAS: BARRA DE PROGRESSO & PRAZO === */}
-                                      {g && item.type === 'GOAL_CREATED' && (
-                                          <div className="mt-3 w-full bg-black/30 rounded-full h-1.5 border border-white/5 overflow-hidden flex">
-                                            <div 
-                                              className="bg-indigo-500 h-full rounded-full" 
-                                              style={{ width: `${Math.min((g.current_amount / g.target_amount) * 100, 100)}%` }}
-                                            ></div>
-                                          </div>
-                                      )}
-                                      {g && g.deadline && (
-                                          <div className="mt-2 flex items-center gap-1.5 text-xs text-indigo-300/80">
-                                             <CalendarDays size={12} /> Prazo: {formatDate(g.deadline)}
+                                      {/* META: ALVO (Sem dividir por 100 - Raw Value) */}
+                                      {g && isGoalCreated && (
+                                          <div className="mt-3 flex items-center gap-2">
+                                              <span className="text-xs uppercase text-gray-500 font-bold">Alvo Definido:</span>
+                                              <span className="text-indigo-400 font-bold text-base bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                                                  {formatCurrencyRaw(g.target_amount)}
+                                              </span>
                                           </div>
                                       )}
 
-                                      {/* === GRID DE DETALHES (Trip Info, Fuel, etc) === */}
-                                      {(t?.odometer || (fuelData) || (incomeData)) && (
-                                          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                              
-                                              {/* Odômetro */}
-                                              {t?.odometer && t.odometer > 0 && (
-                                                <div className="flex flex-col p-1.5 rounded bg-black/20 border border-white/5">
-                                                    <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 flex items-center gap-1"><Gauge size={8}/> Odômetro</span>
-                                                    <span className="text-xs font-mono text-gray-300">{formatNumber(t.odometer)} km</span>
-                                                </div>
-                                              )}
-
-                                              {/* Combustível */}
-                                              {isFuel && fuelData && (
-                                                <div className="flex flex-col p-1.5 rounded bg-black/20 border border-white/5">
-                                                    <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 flex items-center gap-1"><Droplets size={8}/> Litros</span>
-                                                    <div className="flex items-center gap-1">
-                                                      <span className="text-xs font-mono text-gray-300">{fuelData.liters} L</span>
-                                                      {fuelData.fullTank && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Tanque Cheio"/>}
+                                      {isIncome && (
+                                          <div className="mt-4 flex gap-3 flex-wrap">
+                                              {t.distanceDriven > 0 && (
+                                                <div className="flex items-center gap-2 bg-black/20 px-2 py-1.5 rounded border border-white/5">
+                                                    <div className="p-1 bg-blue-500/20 rounded-full"><MapIcon size={12} className="text-blue-400"/></div>
+                                                    <div>
+                                                        <span className="text-[9px] text-gray-500 uppercase block leading-none">Trip</span>
+                                                        <span className="text-xs font-mono text-white">{t.distanceDriven} km</span>
                                                     </div>
                                                 </div>
                                               )}
-
-                                              {/* === RECEITAS: INFORMAÇÕES COMPLETAS DE TRIP === */}
-                                              {isIncome && incomeData && (
-                                                  <>
-                                                    {/* Distância Percorrida */}
-                                                    {incomeData.distanceDriven > 0 && (
-                                                      <div className="flex flex-col p-1.5 rounded bg-black/20 border border-white/5">
-                                                          <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 flex items-center gap-1"><Navigation size={8}/> Distância</span>
-                                                          <span className="text-xs font-mono text-white">{incomeData.distanceDriven} km</span>
-                                                      </div>
-                                                    )}
-
-                                                    {/* Tempo / Duração */}
-                                                    {incomeData.durationMinutes > 0 && (
-                                                      <div className="flex flex-col p-1.5 rounded bg-black/20 border border-white/5">
-                                                          <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 flex items-center gap-1"><Clock size={8}/> Tempo</span>
-                                                          <span className="text-xs font-mono text-white">{formatTimeDuration(incomeData.durationMinutes)}</span>
-                                                      </div>
-                                                    )}
-
-                                                    {/* Eficiência (R$/km) */}
-                                                    {incomeData.distanceDriven > 0 && (
-                                                      <div className="flex flex-col p-1.5 rounded bg-black/20 border border-white/5">
-                                                          <span className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 flex items-center gap-1"><TrendingUp size={8}/> R$/Km</span>
-                                                          <span className="text-xs font-mono text-emerald-400">
-                                                            R$ {((t!.amount / 100) / incomeData.distanceDriven).toFixed(2)}
-                                                          </span>
-                                                      </div>
-                                                    )}
-                                                  </>
+                                              {t.odometer > 0 && (
+                                                <div className="flex items-center gap-2 bg-black/20 px-2 py-1.5 rounded border border-white/5">
+                                                    <div className="p-1 bg-emerald-500/20 rounded-full"><Gauge size={12} className="text-emerald-400"/></div>
+                                                    <div>
+                                                        <span className="text-[9px] text-gray-500 uppercase block leading-none">Odômetro</span>
+                                                        <span className="text-xs font-mono text-white">{formatNumber(t.odometer)} km</span>
+                                                    </div>
+                                                </div>
                                               )}
                                           </div>
                                       )}
+
+                                      {isFuel && (
+                                        <div className="mt-4 grid grid-cols-2 gap-2">
+                                            <div className="flex items-center gap-2 bg-black/20 px-2 py-1.5 rounded border border-white/5">
+                                                <div className="p-1 bg-yellow-500/20 rounded-full"><Fuel size={12} className="text-yellow-400"/></div>
+                                                <div>
+                                                    <span className="text-[9px] text-gray-500 uppercase block leading-none">Combustível</span>
+                                                    <span className="text-xs font-bold text-white uppercase">
+                                                        {FUEL_TRANSLATIONS[t.fuelType?.toUpperCase()] || t.fuelType || 'Comum'}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 bg-black/20 px-2 py-1.5 rounded border border-white/5">
+                                                <div className="p-1 bg-orange-500/20 rounded-full"><Droplets size={12} className="text-orange-400"/></div>
+                                                <div>
+                                                    <span className="text-[9px] text-gray-500 uppercase block leading-none">Volume</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-xs font-mono text-white">{t.liters} L</span>
+                                                        {t.fullTank && (
+                                                            <span className="text-[9px] bg-emerald-500 text-gray-900 px-1 rounded font-bold" title="Tanque Cheio">FULL</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                      )}
+
                                    </div>
                                 </div>
 
-                                {/* Valor / Status (Direita) */}
-                                <div className="text-right shrink-0">
+                                <div className="text-right shrink-0 flex flex-col items-end justify-between h-full min-h-[50px]">
                                    {g ? (
                                       <div className="flex flex-col items-end">
-                                        <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider mb-0.5">Alvo</span>
-                                        <span className={`text-lg font-bold ${styles.text}`}>
-                                           {formatMoney(g.target_amount)}
-                                        </span>
-                                        {item.type === 'GOAL_REACHED' && (
-                                          <span className="flex items-center gap-1 text-xs text-purple-400 bg-purple-900/40 px-2 py-0.5 rounded-full mt-1">
-                                            <CheckCircle2 size={10} /> Concluída
+                                        {item.type === 'GOAL_REACHED' ? (
+                                          <span className="flex items-center gap-1 text-xs text-purple-400 bg-purple-900/40 px-2 py-0.5 rounded-full mt-1 border border-purple-500/30">
+                                            <CheckCircle2 size={12} /> Concluída
                                           </span>
+                                        ) : (
+                                            <span className="text-xs text-indigo-300 bg-indigo-900/40 px-2 py-1 rounded-lg border border-indigo-500/30">
+                                                Iniciada
+                                            </span>
                                         )}
                                       </div>
                                    ) : (
+                                      // TRANSAÇÕES: USA FORMATO DE CENTAVOS
                                       <span className={`text-xl font-bold whitespace-nowrap block ${styles.text}`}>
-                                         {isIncome ? '+' : '-'}{formatMoney(t!.amount)}
+                                         {isIncome ? '+' : '-'}{formatCurrencyCents(t!.amount)}
                                       </span>
                                    )}
+
+                                   {/* ID DISCRETO NO RODAPÉ DO CARD */}
+                                   <div className="mt-auto pt-2 opacity-30 hover:opacity-100 transition-opacity flex items-center justify-end">
+                                      <span className="text-[9px] text-gray-500 font-mono flex items-center gap-0.5 cursor-text select-all">
+                                         <Hash size={8} /> {item.id.slice(0, 4)}...
+                                      </span>
+                                   </div>
                                 </div>
                              </div>
 
@@ -579,15 +605,13 @@ export default function TimelinePage() {
               </div>
             ))}
             
-            {/* EVENTO FIXO: INÍCIO */}
-            <div className="relative md:pl-24 flex gap-4 group z-10 pb-10">
-              <div className="absolute left-8 md:left-9 top-0 h-8 w-3 bg-gray-800 rounded-b-full hidden md:block z-0">
-                  <div className="w-full h-full border-l border-dashed border-gray-600/30 mx-auto w-0"></div>
-              </div>
-              <div className="hidden md:flex absolute left-9 top-0 w-10 h-10 -ml-3.5 rounded-full border-4 border-gray-900 z-10 items-center justify-center bg-gray-800 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+            {/* CARD INICIAL - Linha conectando ao centro */}
+            <div className="relative md:pl-28 flex gap-4 group z-10 pb-10">
+              {/* O alinhamento left-14 e -ml-5 garante que esteja centralizado com a linha principal */}
+              <div className="hidden md:flex absolute left-14 top-0 w-10 h-10 -ml-5 rounded-full border-4 border-gray-900 z-10 items-center justify-center bg-gray-800 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                   <Flag size={18} className="text-emerald-400" />
               </div>
-              <div className="md:hidden flex flex-col items-center min-w-[3.5rem] pt-1">
+              <div className="md:hidden flex flex-col items-center min-w-[3.5rem] pt-1 z-10 bg-gray-950">
                  <Flag size={18} className="text-emerald-500" />
               </div>
               <div className="flex-1 relative z-10">
@@ -600,11 +624,8 @@ export default function TimelinePage() {
                           <Route className="text-emerald-500" size={24} />
                        </div>
                        <div>
-                          <h3 className="font-bold text-emerald-400 text-xl leading-tight mb-1">Bem-Vindo à Financial Drive Hub!</h3>
-                          <p className="text-sm text-gray-400 font-medium">Sua jornada começa aqui.</p>
-                          <div className="mt-4 pt-4 border-t border-gray-800 text-sm text-gray-400 italic leading-relaxed">
-                            "Não é apenas sobre chegar ao destino, é sobre o quanto você lucra no caminho. Mantenha o controle e acelere seus resultados."
-                          </div>
+                          <h3 className="font-bold text-emerald-400 text-xl leading-tight mb-1">Início da Jornada</h3>
+                          <p className="text-sm text-gray-400 font-medium">Bem-vindo ao Financial Drive Hub.</p>
                        </div>
                     </div>
                  </div>
