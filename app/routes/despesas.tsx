@@ -12,6 +12,51 @@ import { ExpenseCategory, FuelType } from "~/types/enums";
 import type { Vehicle, ExpenseTransaction, FuelTransaction } from "~/types/models";
 import type { User } from "@supabase/supabase-js";
 
+// === ESTILOS GLOBAIS (SCROLLBAR E INPUTS) ===
+const GLOBAL_STYLES = `
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+
+  /* Remover setas de input number */
+  input::-webkit-outer-spin-button,
+  input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+
+  /* Ícones de Calendário/Relógio Brancos */
+  input[type="date"], input[type="time"] { color-scheme: dark; }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.5);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+`;
+
+// === HELPER: DATA/HORA LOCAL E ISO ROBUSTO ===
+const getLocalDate = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getLocalTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// Combina a data e hora digitadas criando um objeto Date no Fuso Local
+const formatToISO = (dateStr: string, timeStr: string) => {
+  if (!dateStr || !timeStr) return new Date().toISOString();
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const localDate = new Date(year, month - 1, day, hours, minutes);
+  return localDate.toISOString();
+};
+
 // === HELPER DE UNIDADES E ÍCONES ===
 const getFuelUnit = (type: FuelType) => {
   switch (type) {
@@ -50,7 +95,7 @@ const getBrandLogo = (brand: string) => {
   return `/logos/brands/${normalized}.png`;
 };
 
-// === COMPONENTES DE UI AUXILIARES (MOVIDOS PARA FORA) ===
+// === COMPONENTES DE UI AUXILIARES ===
 
 const InputField = ({ label, value, onChange, type = "number", step = "any", placeholder = "" }: any) => (
   <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
@@ -221,10 +266,13 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
 
   useEffect(() => {
     if (transaction) {
+      // CORREÇÃO: Usar os componentes locais da data para preencher os inputs
+      // e evitar que o toISOString() + split converta para o dia anterior em UTC
       const txDate = new Date(transaction.date);
       setFormData({
         amount: (transaction.amount / 100).toFixed(2),
-        date: txDate.toISOString().split('T')[0],
+        // Monta YYYY-MM-DD localmente
+        date: `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`,
         time: txDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         odometer: transaction.odometer || 0,
         liters: transaction.liters || 0,
@@ -252,7 +300,8 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
     try {
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
-        date: new Date(`${formData.date}T${formData.time}:00`).toISOString(),
+        // CORREÇÃO: Usar helper formatToISO para garantir fuso local
+        date: formatToISO(formData.date, formData.time),
         odometer: Number(formData.odometer),
       };
 
@@ -327,33 +376,33 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
                  {isFuel ? (
                     <>
                        <InputField 
-                            label={`Quantidade (${unit})`} 
-                            value={formData.liters} 
-                            onChange={(e: any) => handleUpdateField('liters', e.target.value)} 
-                            step="0.001" 
+                           label={`Quantidade (${unit})`} 
+                           value={formData.liters} 
+                           onChange={(e: any) => handleUpdateField('liters', e.target.value)} 
+                           step="0.001" 
                        />
                        <InputField 
-                            label={`Preço / ${unit}`} 
-                            value={formData.pricePerLiter} 
-                            onChange={(e: any) => handleUpdateField('pricePerLiter', e.target.value)} 
-                            step="0.001" 
+                           label={`Preço / ${unit}`} 
+                           value={formData.pricePerLiter} 
+                           onChange={(e: any) => handleUpdateField('pricePerLiter', e.target.value)} 
+                           step="0.001" 
                        />
                        <div className="col-span-2">
-                            <InputField 
-                                label="Nome do Posto" 
-                                value={formData.stationName} 
-                                onChange={(e: any) => handleUpdateField('stationName', e.target.value)} 
-                                type="text" 
-                            />
+                           <InputField 
+                               label="Nome do Posto" 
+                               value={formData.stationName} 
+                               onChange={(e: any) => handleUpdateField('stationName', e.target.value)} 
+                               type="text" 
+                           />
                        </div>
                     </>
                  ) : (
                     <div className="col-span-2">
                         <InputField 
-                            label="Descrição" 
-                            value={formData.description} 
-                            onChange={(e: any) => handleUpdateField('description', e.target.value)} 
-                            type="text" 
+                           label="Descrição" 
+                           value={formData.description} 
+                           onChange={(e: any) => handleUpdateField('description', e.target.value)} 
+                           type="text" 
                         />
                     </div>
                  )}
@@ -363,7 +412,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
                  <div className="text-center mb-6">
                     <span className="text-4xl font-bold text-emerald-400">{(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                     <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
-                        <Calendar size={12}/> {new Date(formData.date + 'T' + formData.time + ':00').toLocaleDateString('pt-BR')} - {formData.time}
+                       <Calendar size={12}/> {new Date(formData.date + 'T' + formData.time + ':00').toLocaleDateString('pt-BR')} - {formData.time}
                     </p>
                  </div>
                  <div className="grid grid-cols-1 gap-3">
@@ -430,8 +479,9 @@ export default function DespesasPage() {
   // Estados Comuns
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [amount, setAmount] = useState(""); 
-  const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
-  const [time, setTime] = useState(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+  // CORREÇÃO: Inicialização de data e hora com helpers locais
+  const [date, setDate] = useState(getLocalDate());
+  const [time, setTime] = useState(getLocalTime());
   const [description, setDescription] = useState("");
   const [odometer, setOdometer] = useState(""); 
 
@@ -590,14 +640,15 @@ export default function DespesasPage() {
       const amountInCents = Math.round(parseFloat(safeAmount) * 100);
       const currentOdometerValue = Number(odometer);
       
-      const dateTime = new Date(`${date}T${time}:00`);
+      // CORREÇÃO: Usar o helper formatToISO
+      const isoDate = formatToISO(date, time);
 
       const baseData = {
         user_id: user.id,
         vehicle_id: selectedVehicleId,
         type: 'EXPENSE',
         amount: amountInCents,
-        date: dateTime.toISOString(), 
+        date: isoDate, 
         description: activeTab === 'FUEL' ? 'Abastecimento' : description,
         odometer: currentOdometerValue > 0 ? currentOdometerValue : null,
       };
@@ -625,6 +676,8 @@ export default function DespesasPage() {
             current_odometer: currentOdometerValue,
             updated_at: new Date().toISOString()
         };
+        // A data de lançamento deve ser considerada local para comparação, mas vamos simplificar
+        // Se a data do lançamento é hoje ou futuro, atualizamos last_odometer_date
         const launchDate = new Date(`${date}T00:00:00`);
         const today = new Date();
         today.setHours(0,0,0,0);
@@ -677,6 +730,8 @@ export default function DespesasPage() {
   return (
     <div className="pb-32 pt-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       
+      <style>{GLOBAL_STYLES}</style>
+
       {/* HEADER DA PÁGINA */}
       <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold text-white">Minhas Despesas</h1>
@@ -785,18 +840,18 @@ export default function DespesasPage() {
                                   <p className="text-sm text-gray-500 italic">Nenhuma fonte configurada para este veículo.</p>
                               ) : availableFuels.map(f => (
                                   <button
-                                      key={f}
-                                      type="button"
-                                      onClick={() => setFuelType(f)}
-                                      className={`flex-1 min-w-[80px] py-3 rounded-xl border font-bold text-sm transition-all relative overflow-hidden flex items-center justify-center gap-1 ${
-                                          fuelType === f 
-                                          ? (f === FuelType.ETHANOL ? 'bg-emerald-600 border-emerald-500 text-white' 
-                                              : f === FuelType.GASOLINE ? 'bg-red-600 border-red-500 text-white'
-                                              : f === FuelType.CNG ? 'bg-blue-600 border-blue-500 text-white'
-                                              : f === FuelType.ELECTRIC ? 'bg-yellow-500 border-yellow-400 text-black'
-                                              : 'bg-yellow-600 border-yellow-500 text-white')
-                                          : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
-                                      }`}
+                                    key={f}
+                                    type="button"
+                                    onClick={() => setFuelType(f)}
+                                    className={`flex-1 min-w-[80px] py-3 rounded-xl border font-bold text-sm transition-all relative overflow-hidden flex items-center justify-center gap-1 ${
+                                      fuelType === f 
+                                      ? (f === FuelType.ETHANOL ? 'bg-emerald-600 border-emerald-500 text-white' 
+                                        : f === FuelType.GASOLINE ? 'bg-red-600 border-red-500 text-white'
+                                        : f === FuelType.CNG ? 'bg-blue-600 border-blue-500 text-white'
+                                        : f === FuelType.ELECTRIC ? 'bg-yellow-500 border-yellow-400 text-black'
+                                        : 'bg-yellow-600 border-yellow-500 text-white')
+                                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'
+                                    }`}
                                   >
                                       {f === FuelType.ELECTRIC && <Zap size={14}/>}
                                       {f === FuelType.CNG && <Flame size={14}/>}

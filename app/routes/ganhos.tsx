@@ -39,6 +39,18 @@ const GLOBAL_STYLES = `
   input[type="date"], input[type="time"] {
     color-scheme: dark;
   }
+  
+  /* Força ícones brancos (invertidos) para maior contraste */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.5);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  input[type="time"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
 
   /* Animação de Shimmer para Skeleton */
   @keyframes shimmer {
@@ -53,16 +65,29 @@ const GLOBAL_STYLES = `
 `;
 
 // === HELPER: DATA LOCAL CORRETA ===
-// Corrige o bug de salvar no dia anterior (fuso horário)
+// Garante o formato YYYY-MM-DD para o input HTML sem conversão de fuso indesejada
 const getLocalDate = () => {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  const localDate = new Date(now.getTime() - offset);
-  return localDate.toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Garante o formato HH:MM para o input HTML
 const getLocalTime = () => {
-  return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// === HELPER: CRIAÇÃO DE ISO SEGURA ===
+// Combina a data e hora digitadas criando um objeto Date no Fuso Local do usuário
+const formatToISO = (dateStr: string, timeStr: string) => {
+  if (!dateStr || !timeStr) return new Date().toISOString();
+  
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  
+  // Cria data usando construtor local (respeita fuso Brasil/Local)
+  const localDate = new Date(year, month - 1, day, hours, minutes);
+  return localDate.toISOString();
 };
 
 // === MAPA DE LOGOS DE MARCAS ===
@@ -334,11 +359,8 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
   // === NOVO: BLOQUEIO DE SCROLL DO BODY ===
   useEffect(() => {
     if (isOpen) {
-      // Salva o estilo original (geralmente 'unset' ou vazio)
       const originalOverflow = document.body.style.overflow;
-      // Bloqueia scroll
       document.body.style.overflow = 'hidden';
-      // Restaura ao fechar/desmontar
       return () => {
         document.body.style.overflow = originalOverflow;
       };
@@ -350,6 +372,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
       const txDate = new Date(transaction.date);
       setFormData({
         amount: (transaction.amount / 100).toFixed(2),
+        // CORREÇÃO: Usar string ISO splitada para pegar YYYY-MM-DD
         date: txDate.toISOString().split('T')[0],
         time: txDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         distanceDriven: transaction.distanceDriven || 0,
@@ -413,8 +436,8 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
     try {
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
-        // CORREÇÃO: Usar string direta para evitar conversão automática de fuso pelo Browser
-        date: new Date(`${formData.date}T${formData.time}:00`).toISOString(),
+        // CORREÇÃO: Uso do helper seguro formatToISO
+        date: formatToISO(formData.date, formData.time),
         distance: Number(formData.distanceDriven), 
         odometer: Number(formData.odometer),
         cluster_km_per_liter: Number(formData.clusterKmPerLiter), 
@@ -431,7 +454,6 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
         }));
       }
 
-      // O onUpdate agora é otimista, então esperamos ele retornar (que será rápido)
       await onUpdate(transaction.id, updates);
       setIsEditing(false);
     } catch (error) {
@@ -556,6 +578,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                        {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </span>
                     <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
+                       {/* Exibição amigável: DD/MM/AAAA */}
                        <Calendar size={12}/> {new Date(formData.date + 'T' + formData.time + ':00').toLocaleDateString('pt-BR')} - {formData.time}
                     </p>
                  </div>
@@ -964,14 +987,14 @@ export default function GanhosPage() {
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
-      // CORREÇÃO: Combinar a data e hora local do input e converter para ISO sem alterar o dia
+      // CORREÇÃO: Uso do helper seguro formatToISO
       const transactionData: any = {
         user_id: user.id,
         vehicle_id: selectedVehicle,
         type: 'INCOME',
         platform: finalPlatform,
         amount: amountCents,
-        date: new Date(`${date}T${time}:00`).toISOString(),
+        date: formatToISO(date, time),
         
         // Mapeamento correto para colunas existentes (ou que devem existir)
         distance: drivenKm,  // Mudei de distance_driven para distance (padrão anterior)
@@ -1636,6 +1659,16 @@ export default function GanhosPage() {
 
               {isLoadingInitial && Array.from({length: 5}).map((_, i) => <TransactionSkeleton key={i} />)}
 
+              {!isLoadingInitial && recentGains.length === 0 && (
+                <div className="flex flex-col items-center justify-center p-8 text-center text-gray-500 bg-gray-900/50 rounded-2xl border border-gray-800 border-dashed animate-in fade-in zoom-in-95 duration-300">
+                    <div className="bg-gray-800 p-4 rounded-full mb-3 shadow-lg">
+                        <History size={24} className="text-gray-400 opacity-70" />
+                    </div>
+                    <p className="text-sm font-bold text-gray-300">Ainda não há lançamentos.</p>
+                    <p className="text-xs mt-1 text-gray-500 max-w-[200px]">Comece a registrar seus ganhos acima para acompanhar seu progresso!</p>
+                </div>
+              )}
+
               {!isLoadingInitial && recentGains.map(gain => {
                   const platformInfo = getPlatformDetails(gain.platform);
                   const isDeleting = deletingId === gain.id;
@@ -1677,6 +1710,7 @@ export default function GanhosPage() {
                              </div>
                              
                              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                {/* Exibição amigável: DD/MM/AAAA */}
                                 <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
                                 
                                 <span className="text-emerald-500/80 font-mono text-[10px] bg-emerald-500/10 px-1 rounded border border-emerald-500/20">
