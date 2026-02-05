@@ -35,6 +35,11 @@ const GLOBAL_STYLES = `
     -moz-appearance: textfield;
   }
 
+  /* CORREÇÃO: Ícones de Calendário e Relógio Brancos no Modo Dark */
+  input[type="date"], input[type="time"] {
+    color-scheme: dark;
+  }
+
   /* Animação de Shimmer para Skeleton */
   @keyframes shimmer {
     0% { background-position: -200% 0; }
@@ -46,6 +51,19 @@ const GLOBAL_STYLES = `
     animation: shimmer 1.5s infinite;
   }
 `;
+
+// === HELPER: DATA LOCAL CORRETA ===
+// Corrige o bug de salvar no dia anterior (fuso horário)
+const getLocalDate = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60000;
+  const localDate = new Date(now.getTime() - offset);
+  return localDate.toISOString().split('T')[0];
+};
+
+const getLocalTime = () => {
+  return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+};
 
 // === MAPA DE LOGOS DE MARCAS ===
 const BRAND_LOGOS: { [key: string]: string } = {
@@ -161,7 +179,7 @@ const mapTransactionFromDB = (t: any): IncomeTransactionWithSplit => ({
     description: t.description || t.notes || "",
     userId: t.user_id,
     vehicleId: t.vehicle_id,
-    
+     
     // Mapeamento robusto para lidar com variações de nome de coluna (snake_case do DB para camelCase da App)
     distanceDriven: Number(t.distance_driven ?? t.distance ?? 0),
     onlineDurationMinutes: Number(t.online_duration_minutes ?? t.duration ?? 0),
@@ -169,7 +187,7 @@ const mapTransactionFromDB = (t: any): IncomeTransactionWithSplit => ({
     clusterKmPerLiter: Number(t.cluster_km_per_liter ?? 0),
     odometer: Number(t.odometer ?? 0),
     linkedGoalId: t.linked_goal_id,
-    
+     
     notes: t.notes || t.description || "",
     split: t.split,
     createdAt: t.created_at,
@@ -329,9 +347,11 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
 
   useEffect(() => {
     if (transaction) {
+      const txDate = new Date(transaction.date);
       setFormData({
         amount: (transaction.amount / 100).toFixed(2),
-        date: new Date(transaction.date).toISOString().split('T')[0],
+        date: txDate.toISOString().split('T')[0],
+        time: txDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         distanceDriven: transaction.distanceDriven || 0,
         odometer: transaction.odometer || 0,
         clusterKmPerLiter: transaction.clusterKmPerLiter || 0,
@@ -393,7 +413,8 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
     try {
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
-        date: new Date(`${formData.date}T00:00:00`).toISOString(),
+        // CORREÇÃO: Usar string direta para evitar conversão automática de fuso pelo Browser
+        date: new Date(`${formData.date}T${formData.time}:00`).toISOString(),
         distance: Number(formData.distanceDriven), 
         odometer: Number(formData.odometer),
         cluster_km_per_liter: Number(formData.clusterKmPerLiter), 
@@ -505,13 +526,16 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                  <div className="col-span-2">
                     <ModalInputField label={isMultiple ? "Valor Total (Calculado)" : "Valor (R$)"} field="amount" step="0.01" readOnly={isMultiple} value={formData.amount} onChange={handleInputChange} />
                  </div>
-                 <div className="col-span-2">
+                 
+                 <div className="col-span-2 grid grid-cols-2 gap-3">
                     <ModalInputField label="Data" field="date" type="date" value={formData.date} onChange={handleInputChange} />
+                    <ModalInputField label="Horário Registro" field="time" type="time" value={formData.time} onChange={handleInputChange} />
                  </div>
+
                  <ModalInputField label="KM Trip" field="distanceDriven" value={formData.distanceDriven} onChange={handleInputChange} />
                  <ModalInputField label="Odômetro" field="odometer" value={formData.odometer} onChange={handleInputChange} />
                  <ModalInputField label="Média Painel" field="clusterKmPerLiter" step="0.1" value={formData.clusterKmPerLiter} onChange={handleInputChange} />
-                 <ModalInputField label="Horas Online" field="onlineDurationMinutes" step="0.1" value={formData.onlineDurationMinutes} onChange={handleInputChange} />
+                 <ModalInputField label="Duração (h)" field="onlineDurationMinutes" step="0.1" value={formData.onlineDurationMinutes} onChange={handleInputChange} />
                  <ModalInputField label={isMultiple ? "Viagens Total" : "Viagens"} field="tripsCount" readOnly={isMultiple} value={formData.tripsCount} onChange={handleInputChange} />
                  <div className="col-span-2">
                    <div className="bg-gray-800/50 p-2 rounded-lg border border-gray-700">
@@ -532,7 +556,7 @@ function TransactionDetailsModal({ isOpen, onClose, transaction, onUpdate }: { i
                        {(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </span>
                     <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
-                       <Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                       <Calendar size={12}/> {new Date(formData.date + 'T' + formData.time + ':00').toLocaleDateString('pt-BR')} - {formData.time}
                     </p>
                  </div>
 
@@ -658,7 +682,11 @@ export default function GanhosPage() {
   
   const [amount, setAmount] = useState("");
   const [trips, setTrips] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  // CORREÇÃO: Inicializar data e hora com LOCAL TIME para evitar "Dia Anterior" e "Hora Errada"
+  const [date, setDate] = useState(getLocalDate());
+  const [time, setTime] = useState(getLocalTime());
+
   const [distance, setDistance] = useState(""); 
   const [odometerInput, setOdometerInput] = useState(""); 
   const [clusterAvg, setClusterAvg] = useState(""); 
@@ -917,7 +945,7 @@ export default function GanhosPage() {
       const amountCents = Math.round(parseFloat(amount.replace(',', '.')) * 100);
       const hoursNum = parseFloat(hours.replace(',', '.')) || 0;
       const avgNum = parseFloat(clusterAvg.replace(',', '.')) || 0;
-      const drivenKm = Number(distance) || 0;          
+      const drivenKm = Number(distance) || 0;           
       const finalOdometer = Number(odometerInput) || 0; 
       const tripsNum = Number(trips) || 0;
 
@@ -936,14 +964,14 @@ export default function GanhosPage() {
       const currentVehicle = vehicles.find(v => v.id === selectedVehicle);
       const startOdometer = currentVehicle?.currentOdometer || 0;
 
-      // CORREÇÃO DO PAYLOAD PARA O BANCO (Usando nomes padrão)
+      // CORREÇÃO: Combinar a data e hora local do input e converter para ISO sem alterar o dia
       const transactionData: any = {
         user_id: user.id,
         vehicle_id: selectedVehicle,
         type: 'INCOME',
         platform: finalPlatform,
         amount: amountCents,
-        date: new Date(`${date}T00:00:00`).toISOString(),
+        date: new Date(`${date}T${time}:00`).toISOString(),
         
         // Mapeamento correto para colunas existentes (ou que devem existir)
         distance: drivenKm,  // Mudei de distance_driven para distance (padrão anterior)
@@ -1051,14 +1079,14 @@ export default function GanhosPage() {
 
   // === OTIMIZAÇÃO: EDIÇÃO OTIMISTA (INSTANTÂNEA) ===
   const handleUpdateTransaction = async (id: string, updates: any) => {
-     // 1. Snapshot do estado anterior
-     const previousGains = [...recentGains];
-     const existingItem = recentGains.find(g => g.id === id);
-     
-     if (!existingItem) return;
+      // 1. Snapshot do estado anterior
+      const previousGains = [...recentGains];
+      const existingItem = recentGains.find(g => g.id === id);
+      
+      if (!existingItem) return;
 
-     // 2. Determinar o novo objeto para UI imediata (Mapeia chaves do DB para UI)
-     const optimisticItem: IncomeTransactionWithSplit = {
+      // 2. Determinar o novo objeto para UI imediata (Mapeia chaves do DB para UI)
+      const optimisticItem: IncomeTransactionWithSplit = {
         ...existingItem,
         amount: updates.amount,
         date: updates.date,
@@ -1070,42 +1098,42 @@ export default function GanhosPage() {
         description: updates.notes,
         // Se tiver split
         split: updates.split || existingItem.split
-     };
+      };
 
-     // 3. Atualizar UI imediatamente E REORDENAR (Caso a data mude)
-     setRecentGains(prev => 
+      // 3. Atualizar UI imediatamente E REORDENAR (Caso a data mude)
+      setRecentGains(prev => 
         prev.map(item => item.id === id ? optimisticItem : item)
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-     );
-     setSelectedTransaction(optimisticItem); // Atualiza modal se estiver aberto
+      );
+      setSelectedTransaction(optimisticItem); // Atualiza modal se estiver aberto
 
-     try {
-       // 4. Envia para o servidor em segundo plano
-       const { error } = await supabase.from('transactions').update(updates).eq('id', id);
-       
-       if (error) throw error;
-       
-       setFeedback({
+      try {
+        // 4. Envia para o servidor em segundo plano
+        const { error } = await supabase.from('transactions').update(updates).eq('id', id);
+        
+        if (error) throw error;
+        
+        setFeedback({
           isOpen: true,
           type: 'success',
           title: 'Atualizado',
           message: 'Lançamento atualizado com sucesso.'
-       });
+        });
 
-     } catch (error) {
-       console.error(error);
-       
-       // 5. ROLLBACK: Reverte o estado se der erro
-       setRecentGains(previousGains);
-       setSelectedTransaction(existingItem);
-       
-       setFeedback({
+      } catch (error) {
+        console.error(error);
+        
+        // 5. ROLLBACK: Reverte o estado se der erro
+        setRecentGains(previousGains);
+        setSelectedTransaction(existingItem);
+        
+        setFeedback({
           isOpen: true,
           type: 'error',
           title: 'Erro ao Atualizar',
           message: 'Falha ao salvar alterações. Os dados foram restaurados.'
-       });
-     }
+        });
+      }
   };
 
   const handleRequestDelete = (e: React.MouseEvent, id: string) => {
@@ -1258,20 +1286,20 @@ export default function GanhosPage() {
                         onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
                         className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-700/80 transition-colors focus:ring-2 focus:ring-emerald-500 outline-none h-14"
                       >
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center p-1 border border-gray-600 overflow-hidden">
-                               {activeVehicle ? (
-                                 getBrandLogo(activeVehicle.brand) ? (
-                                   <img src={getBrandLogo(activeVehicle.brand)!} alt={activeVehicle.brand} className="w-full h-full object-contain" />
-                                 ) : <Car size={16} className="text-gray-400"/>
-                               ) : <Car size={16} className="text-gray-400"/>}
-                            </div>
-                            <div className="flex flex-col items-start">
-                               <span className="font-bold text-sm leading-tight">{activeVehicle?.name || 'Selecione um veículo'}</span>
-                               {activeVehicle && <span className="text-[10px] text-gray-400 leading-tight uppercase">{activeVehicle.licensePlate}</span>}
-                            </div>
-                         </div>
-                         <ChevronDown size={18} className={`text-gray-400 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
+                          <div className="flex items-center gap-3">
+                             <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center p-1 border border-gray-600 overflow-hidden">
+                                {activeVehicle ? (
+                                  getBrandLogo(activeVehicle.brand) ? (
+                                    <img src={getBrandLogo(activeVehicle.brand)!} alt={activeVehicle.brand} className="w-full h-full object-contain" />
+                                  ) : <Car size={16} className="text-gray-400"/>
+                                ) : <Car size={16} className="text-gray-400"/>}
+                             </div>
+                             <div className="flex flex-col items-start">
+                                <span className="font-bold text-sm leading-tight">{activeVehicle?.name || 'Selecione um veículo'}</span>
+                                {activeVehicle && <span className="text-[10px] text-gray-400 leading-tight uppercase">{activeVehicle.licensePlate}</span>}
+                             </div>
+                          </div>
+                          <ChevronDown size={18} className={`text-gray-400 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
                       </button>
 
                       {isVehicleDropdownOpen && (
@@ -1294,7 +1322,7 @@ export default function GanhosPage() {
                                 >
                                    <div className="flex items-center gap-3">
                                       <div className={`w-8 h-8 rounded-full flex items-center justify-center p-1 border overflow-hidden ${isSelected ? 'bg-emerald-500/20 border-emerald-500' : 'bg-gray-800 border-gray-700'}`}>
-                                         {logo ? <img src={logo} className="w-full h-full object-contain" /> : <Car size={14} className={isSelected ? 'text-emerald-400' : 'text-gray-500'}/>}
+                                          {logo ? <img src={logo} className="w-full h-full object-contain" /> : <Car size={14} className={isSelected ? 'text-emerald-400' : 'text-gray-500'}/>}
                                       </div>
                                       <div className="text-left">
                                          <div className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>{v.name}</div>
@@ -1320,21 +1348,21 @@ export default function GanhosPage() {
                    </label>
                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                       {displayedPlatforms.map((p) => {
-                         const isSelected = selectedPlatforms.includes(p.id);
-                         return (
-                           <button
-                             key={p.id}
-                             type="button"
-                             onClick={() => togglePlatform(p.id as Platform)}
-                             className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 cursor-pointer ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
-                           >
-                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
-                                {p.logo ? <img src={p.logo} alt={p.label} className="w-full h-full object-cover" /> : p.icon}
-                              </div>
-                              <span className="font-bold text-sm tracking-tight">{p.label}</span>
-                              {isSelected && <CheckCircle2 size={18} className="absolute top-2 right-2 text-white drop-shadow-md" />}
-                           </button>
-                         )
+                          const isSelected = selectedPlatforms.includes(p.id);
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => togglePlatform(p.id as Platform)}
+                              className={`relative h-28 rounded-2xl border transition-all duration-200 flex flex-col items-center justify-center gap-2 group overflow-hidden active:scale-95 cursor-pointer ${isSelected ? `${p.bg} ${p.textColor} border-transparent shadow-lg ring-2 ring-white/30` : 'bg-gray-900 border-gray-800 text-gray-400 hover:bg-gray-800'}`}
+                            >
+                               <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden ${!p.logo ? 'bg-white/10' : 'bg-white'} ${isSelected ? 'shadow-lg scale-110' : 'opacity-90 group-hover:scale-110 transition-transform'}`}>
+                                 {p.logo ? <img src={p.logo} alt={p.label} className="w-full h-full object-cover" /> : p.icon}
+                               </div>
+                               <span className="font-bold text-sm tracking-tight">{p.label}</span>
+                               {isSelected && <CheckCircle2 size={18} className="absolute top-2 right-2 text-white drop-shadow-md" />}
+                            </button>
+                          )
                       })}
                       {!showAllPlatforms && (
                         <button type="button" onClick={() => setShowAllPlatforms(true)} className="h-28 rounded-2xl border border-gray-800 bg-gray-900/50 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex flex-col items-center justify-center gap-2 group active:scale-95 cursor-pointer">
@@ -1411,9 +1439,15 @@ export default function GanhosPage() {
                             />
                           </div>
                       </div>
-                      <div>
-                          <label className="text-gray-500 text-xs font-bold uppercase mb-2 block tracking-wider">Data</label>
-                          <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 md:p-4 text-white focus:border-emerald-500 outline-none h-12 md:h-14"/>
+                      <div className="grid grid-cols-2 gap-3 md:col-span-2">
+                          <div>
+                              <label className="text-gray-500 text-xs font-bold uppercase mb-2 block tracking-wider">Data</label>
+                              <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 md:p-4 text-white focus:border-emerald-500 outline-none h-12 md:h-14"/>
+                          </div>
+                          <div>
+                              <label className="text-gray-500 text-xs font-bold uppercase mb-2 block tracking-wider">Horário Registro</label>
+                              <input type="time" required value={time} onChange={e => setTime(e.target.value)} className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 md:p-4 text-white focus:border-emerald-500 outline-none h-12 md:h-14"/>
+                          </div>
                       </div>
                    </div>
                 </div>
@@ -1496,7 +1530,7 @@ export default function GanhosPage() {
                    </div>
 
                    <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-800 flex flex-col justify-center">
-                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Horas</label>
+                       <label className="text-gray-500 text-[9px] md:text-[10px] font-bold uppercase mb-1 block">Duração (h)</label>
                        <div className="flex items-center gap-1.5">
                           <Clock size={14} className="text-yellow-500 shrink-0" />
                           <input 
@@ -1613,7 +1647,7 @@ export default function GanhosPage() {
                       onClick={() => setSelectedTransaction(gain)}
                       className="group relative bg-gray-900 border border-gray-800 hover:border-emerald-500/30 hover:bg-gray-800 p-3 rounded-xl transition-all flex items-center justify-between overflow-hidden mb-3 cursor-pointer"
                     >
-                       <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 min-w-[2.5rem] rounded-xl flex items-center justify-center shadow-sm overflow-hidden relative ${isMultiple ? 'bg-indigo-600' : 'bg-white'}`}>
                             {isMultiple ? (
                              <Layers size={20} className="text-white"/>
@@ -1644,6 +1678,11 @@ export default function GanhosPage() {
                              
                              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
                                 <span>{new Date(gain.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>
+                                
+                                <span className="text-emerald-500/80 font-mono text-[10px] bg-emerald-500/10 px-1 rounded border border-emerald-500/20">
+                                   {new Date(gain.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+
                                 {gain.clusterKmPerLiter && gain.clusterKmPerLiter > 0 && (
                                    <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-orange-400 font-mono">
                                       <Gauge size={10}/> {gain.clusterKmPerLiter} km/l
@@ -1651,13 +1690,13 @@ export default function GanhosPage() {
                                 )}
                                 {gain.notes && (
                                    <span className="flex items-center gap-0.5 border-l border-gray-700 pl-2 text-gray-400 italic truncate max-w-[100px]">
-                                       <FileText size={10}/> {gain.notes}
+                                           <FileText size={10}/> {gain.notes}
                                    </span>
                                 )}
                              </div>
                           </div>
-                       </div>
-                       <div className="flex items-center gap-3">
+                        </div>
+                        <div className="flex items-center gap-3">
                           <span className="text-emerald-400 font-bold text-sm md:text-base">{formatMoney(gain.amount)}</span>
                           <button 
                             onClick={(e) => handleRequestDelete(e, gain.id)} 
@@ -1667,8 +1706,8 @@ export default function GanhosPage() {
                           >
                             <Trash2 size={16} />
                           </button>
-                       </div>
-                    </div>
+                        </div>
+                     </div>
                   );
               })}
            </div>

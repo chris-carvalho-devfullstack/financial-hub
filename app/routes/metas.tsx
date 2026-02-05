@@ -266,7 +266,9 @@ function EditTransactionModal({ isOpen, onClose, onConfirm, onRemove, transactio
     );
 }
 
-function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, onEditTransaction }: any) {
+// === MODAL DE DETALHES DA META ===
+// Agora aceita 'lastUpdate' para recarregar quando o Realtime disparar
+function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, onEditTransaction, lastUpdate }: any) {
     const [history, setHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -360,7 +362,8 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
         };
 
         fetchHistory();
-    }, [isOpen, goal]);
+        // ADICIONADO: 'lastUpdate' como dependência para recarregar quando houver mudança externa
+    }, [isOpen, goal, lastUpdate]);
 
     if (!isOpen || !goal) return null;
 
@@ -460,7 +463,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                                                         </p>
                                                         {logos.length > 0 && logos.map((l: any, idxLogo) => (
                                                             <div key={`${l.alt}-${idxLogo}`} className={`relative z-[${logos.length - idxLogo}] ${idxLogo > 0 ? '-ml-2' : ''}`}>
-                                                                    <img src={l.src} alt={l.alt} className="w-5 h-5 object-contain rounded-full bg-gray-800 border border-gray-700" />
+                                                                        <img src={l.src} alt={l.alt} className="w-5 h-5 object-contain rounded-full bg-gray-800 border border-gray-700" />
                                                             </div>
                                                         ))}
                                                     </div>
@@ -473,14 +476,22 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                                                         </div>
                                                     )}
 
-                                                    <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                                                        {item.date ? new Date(item.date).toLocaleDateString('pt-BR') : '-'} 
+                                                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-1">
+                                                        <span>{item.date ? new Date(item.date).toLocaleDateString('pt-BR') : '-'}</span>
+                                                        
+                                                        {/* NOVO: EXIBIÇÃO DA HORA */}
+                                                        {item.date && (
+                                                            <span className="text-gray-600 font-mono text-[10px] bg-gray-800/50 px-1 rounded border border-gray-700">
+                                                               {new Date(item.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
+                                                        )}
+
                                                         {item.source === 'TRANSACTION' && item.id && (
                                                             <span className="bg-gray-800 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-700">
                                                                 #{item.id.slice(0, 6)}
                                                             </span>
                                                         )}
-                                                    </p>
+                                                    </div>
                                                 </div>
                                             </div>
                                             
@@ -543,6 +554,8 @@ export default function MetasPage() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  // NOVO: Estado para controlar atualizações via Realtime
+  const [lastDataUpdate, setLastDataUpdate] = useState(Date.now());
 
   // Estados de UI
   const [mobileFormOpen, setMobileFormOpen] = useState(false);
@@ -606,6 +619,10 @@ export default function MetasPage() {
         const mappedGoals = goalsRes.data.map(mapGoalFromDB);
         setGoals(mappedGoals.sort((a, b) => (a.status === 'COMPLETED' ? 1 : -1)));
       }
+      
+      // Atualiza o timestamp para avisar os modais
+      setLastDataUpdate(Date.now());
+
     } catch (error: any) {
       console.error("Erro ao carregar dados:", error);
     } finally {
@@ -630,6 +647,25 @@ export default function MetasPage() {
     });
     return () => { authListener.subscription.unsubscribe(); };
   }, [fetchAllData]);
+
+  // === NOVO: REALTIME SUBSCRIPTION ===
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Escuta mudanças em METAS e TRANSAÇÕES para manter tudo sincronizado
+    const channel = supabase.channel('realtime-metas-page')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'goals', filter: `user_id=eq.${currentUser.id}` }, () => {
+          fetchAllData(currentUser.id);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${currentUser.id}` }, () => {
+          // Se uma transação mudar (ex: data editada em Ganhos), atualizamos aqui também
+          fetchAllData(currentUser.id);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); }
+  }, [currentUser, fetchAllData]);
+
 
   const toggleVehicleSelection = (id: string) => {
     setSelectedVehicleIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
@@ -705,6 +741,7 @@ export default function MetasPage() {
 
       resetForm();
       setMobileFormOpen(false); 
+      // fetchAllData será chamado pelo realtime, mas chamamos aqui para garantir feedback imediato se o socket falhar
       await fetchAllData(currentUser.id);
 
     } catch (error: any) {
@@ -953,6 +990,7 @@ export default function MetasPage() {
         onDelete={(id: string) => setGoalToDeleteId(id)}
         onEdit={handleEditInit}
         onEditTransaction={(tx: any) => setTransactionToEdit(tx)} 
+        lastUpdate={lastDataUpdate} // NOVO: Passa o trigger para o modal
       />
 
       <header className="mb-8 mt-4 flex flex-col md:flex-row md:items-end justify-between gap-4">

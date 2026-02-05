@@ -221,9 +221,11 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
 
   useEffect(() => {
     if (transaction) {
+      const txDate = new Date(transaction.date);
       setFormData({
         amount: (transaction.amount / 100).toFixed(2),
-        date: new Date(transaction.date).toLocaleDateString('en-CA'),
+        date: txDate.toISOString().split('T')[0],
+        time: txDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         odometer: transaction.odometer || 0,
         liters: transaction.liters || 0,
         pricePerLiter: transaction.pricePerLiter || 0,
@@ -250,7 +252,7 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
     try {
       const updates: any = {
         amount: Math.round(parseFloat(formData.amount.replace(',', '.')) * 100),
-        date: new Date(`${formData.date}T00:00:00`).toISOString(),
+        date: new Date(`${formData.date}T${formData.time}:00`).toISOString(),
         odometer: Number(formData.odometer),
       };
 
@@ -299,14 +301,22 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
                         step="0.01" 
                     />
                  </div>
-                 <div className="col-span-2">
+                 
+                 <div className="col-span-2 grid grid-cols-2 gap-3">
                     <InputField 
                         label="Data" 
                         value={formData.date} 
                         onChange={(e: any) => handleUpdateField('date', e.target.value)} 
                         type="date" 
                     />
+                    <InputField 
+                        label="Hora" 
+                        value={formData.time} 
+                        onChange={(e: any) => handleUpdateField('time', e.target.value)} 
+                        type="time" 
+                    />
                  </div>
+
                  <div className="col-span-2">
                     <InputField 
                         label="Odômetro (KM)" 
@@ -352,7 +362,9 @@ function ExpenseDetailsModal({ isOpen, onClose, transaction, onUpdate }: any) {
               <div className="space-y-3">
                  <div className="text-center mb-6">
                     <span className="text-4xl font-bold text-emerald-400">{(Number(formData.amount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1"><Calendar size={12}/> {new Date(formData.date + 'T12:00:00').toLocaleDateString('pt-BR')}</p>
+                    <p className="text-gray-500 text-sm mt-1 flex items-center justify-center gap-1">
+                        <Calendar size={12}/> {new Date(formData.date + 'T' + formData.time + ':00').toLocaleDateString('pt-BR')} - {formData.time}
+                    </p>
                  </div>
                  <div className="grid grid-cols-1 gap-3">
                     <DisplayField label="Odômetro" value={`${formData.odometer ? formData.odometer + ' km' : 'Não informado'}`} icon={Gauge} color="text-emerald-500" />
@@ -419,6 +431,7 @@ export default function DespesasPage() {
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [amount, setAmount] = useState(""); 
   const [date, setDate] = useState(new Date().toLocaleDateString('en-CA'));
+  const [time, setTime] = useState(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
   const [description, setDescription] = useState("");
   const [odometer, setOdometer] = useState(""); 
 
@@ -577,9 +590,7 @@ export default function DespesasPage() {
       const amountInCents = Math.round(parseFloat(safeAmount) * 100);
       const currentOdometerValue = Number(odometer);
       
-      const now = new Date();
-      const [year, month, day] = date.split('-').map(Number);
-      const dateTime = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+      const dateTime = new Date(`${date}T${time}:00`);
 
       const baseData = {
         user_id: user.id,
@@ -749,11 +760,11 @@ export default function DespesasPage() {
                         <div className="flex items-center gap-3">
                            {selectedVehicle?.brand && (
                               <div className="w-8 h-8 rounded-full bg-white/5 p-1 flex items-center justify-center">
-                                 <img 
-                                    src={getBrandLogo(selectedVehicle.brand) || ''} 
-                                    className="w-full h-full object-contain opacity-80"
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                 />
+                                  <img 
+                                     src={getBrandLogo(selectedVehicle.brand) || ''} 
+                                     className="w-full h-full object-contain opacity-80"
+                                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
                               </div>
                            )}
                            <div className="flex flex-col">
@@ -863,9 +874,15 @@ export default function DespesasPage() {
                       </>
                     )}
 
-                    <div className="pt-2">
-                      <label className="block text-xs text-gray-500 mb-1">Data</label>
-                      <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none"/>
+                    <div className="pt-2 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Data</label>
+                        <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none"/>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Hora</label>
+                        <input type="time" required value={time} onChange={e => setTime(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none"/>
+                      </div>
                     </div>
 
                     <button type="submit" disabled={saving} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 transition-all mt-2 transform active:scale-95">
@@ -915,7 +932,13 @@ export default function DespesasPage() {
                 
                 <div className="flex items-center gap-4">
                   <div className="text-right hidden sm:block">
-                    <span className="text-xs text-gray-500 flex items-center gap-1 justify-end"><Calendar size={12}/> {new Date(exp.date).toLocaleDateString('pt-BR')}</span>
+                    <span className="text-xs text-gray-500 flex items-center gap-1 justify-end">
+                        <Calendar size={12}/> 
+                        {new Date(exp.date).toLocaleDateString('pt-BR')}
+                        <span className="text-gray-600 ml-1 font-mono">
+                           {new Date(exp.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                    </span>
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); setDeleteId(exp.id); }} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors z-10" title="Excluir registro"><Trash2 size={18} /></button>
                 </div>
