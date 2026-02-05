@@ -15,19 +15,41 @@ import type { User } from "@supabase/supabase-js";
 const noSpinnerClass = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
 // === HELPERS ===
-// Agora retorna um array de objetos com src e alt para suportar múltiplos logos
-const getPlatformLogos = (platform: string | null) => {
-  if (!platform) return [];
-  const p = platform.toLowerCase();
-  const logos = [];
-  
-  if (p.includes('uber')) logos.push({ src: '/logos/uber.png', alt: 'Uber' });
-  if (p.includes('99')) logos.push({ src: '/logos/99.png', alt: '99' });
-  if (p.includes('indriver')) logos.push({ src: '/logos/indriver.png', alt: 'inDriver' });
-  if (p.includes('ifood')) logos.push({ src: '/logos/ifood.png', alt: 'iFood' });
-  if (p.includes('ze') || p.includes('delivery')) logos.push({ src: '/logos/ze-delivery.png', alt: 'Zé Delivery' });
+// Helper robusto para pegar logos baseado na transação (suporta MULTIPLE e Enums)
+const getTransactionLogos = (transaction: any) => {
+  if (!transaction) return [];
+  const logos: { src: string; alt: string }[] = [];
+  const platformsToCheck: string[] = [];
+
+  // Se for MULTIPLE, pega do split. Se não, pega da plataforma raiz.
+  if (transaction.platform === 'MULTIPLE' && Array.isArray(transaction.split)) {
+      platformsToCheck.push(...transaction.split.map((s: any) => s.platform));
+  } else if (transaction.platform) {
+      platformsToCheck.push(transaction.platform);
+  }
+
+  platformsToCheck.forEach(p => {
+      const lower = String(p).toLowerCase();
+      if (lower.includes('uber')) {
+          logos.push({ src: '/logos/uber.png', alt: 'Uber' });
+      } else if (lower.includes('99') || lower.includes('ninety')) {
+          logos.push({ src: '/logos/99.png', alt: '99' });
+      } else if (lower.includes('indriver') || lower.includes('indrive')) {
+          logos.push({ src: '/logos/indriver.png', alt: 'inDriver' });
+      } else if (lower.includes('ifood')) {
+          logos.push({ src: '/logos/ifood.png', alt: 'iFood' });
+      } else if (lower.includes('ze') || lower.includes('delivery')) {
+          logos.push({ src: '/logos/ze-delivery.png', alt: 'Zé Delivery' });
+      }
+  });
   
   return logos;
+};
+
+// Helper seguro para formatar moeda (evita o crash com undefined)
+const formatVal = (val: number | undefined | null) => {
+    const v = val ?? 0;
+    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
 // === COMPONENTES DE MODAL ===
@@ -109,7 +131,7 @@ function InputModal({ isOpen, onClose, onConfirm, title }: any) {
   );
 }
 
-// === MODAL DE DETALHES (AUMENTADO E CORRIGIDO) ===
+// === MODAL DE DETALHES (CORRIGIDO) ===
 function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }: any) {
     const [history, setHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
@@ -127,21 +149,62 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                     .order("date", { ascending: false });
 
                 if (error) throw error;
+
+                // Busca histórico de combustível para calcular custo exato na época
+                // Necessário para encontrar o preço do litro na data do ganho
+                let fuelHistory: any[] = [];
+                if (goal.linkedVehicleIds && goal.linkedVehicleIds.length > 0) {
+                    const { data: fuels } = await supabase
+                        .from("transactions")
+                        .select("vehicle_id, price_per_liter, date")
+                        .eq("category", "FUEL")
+                        .in("vehicle_id", goal.linkedVehicleIds)
+                        .order("date", { ascending: false });
+                    if (fuels) fuelHistory = fuels;
+                }
                 
-                const mappedTransactions: any[] = (linkedTransactions || []).map(d => ({ 
-                    ...d, 
-                    source: d.type === 'INCOME' ? 'TRANSACTION' : 'MANUAL' 
-                }));
+                const mappedTransactions: any[] = (linkedTransactions || []).map(t => {
+                    // O banco guarda amount em centavos (integer), converte para reais
+                    const grossAmount = (t.amount || 0) / 100;
+                    let netAmount = grossAmount;
+                    let cost = 0;
+
+                    // Cálculo do Líquido (se houver dados suficientes)
+                    if (t.type === 'INCOME' && t.distance && t.cluster_km_per_liter && t.cluster_km_per_liter > 0) {
+                        // Encontra o abastecimento relevante (data anterior ou igual)
+                        const relevantFuel = fuelHistory.find(f => 
+                            f.vehicle_id === t.vehicle_id && 
+                            new Date(f.date) <= new Date(t.date)
+                        );
+                        
+                        // Fallback: se não achar anterior, pega o mais recente disponível
+                        const fuelPrice = relevantFuel?.price_per_liter || fuelHistory.find(f => f.vehicle_id === t.vehicle_id)?.price_per_liter || 0;
+
+                        if (fuelPrice > 0) {
+                            cost = (t.distance / t.cluster_km_per_liter) * fuelPrice;
+                            netAmount = grossAmount - cost;
+                        }
+                    }
+
+                    return { 
+                        ...t, 
+                        source: t.type === 'INCOME' ? 'TRANSACTION' : 'MANUAL',
+                        netAmount,   // Valor Líquido para exibição em destaque
+                        grossAmount, // Valor Bruto para exibição secundária
+                    };
+                });
                 
-                const totalTracked = mappedTransactions.reduce((acc, curr: any) => acc + (curr.amount / 100), 0);
-                const legacyAmount = goal.currentAmount - totalTracked;
+                // Calcula saldo anterior (Legacy) baseando-se no valor líquido acumulado
+                const totalTrackedNet = mappedTransactions.reduce((acc, curr) => acc + curr.netAmount, 0);
+                const legacyAmount = (goal.currentAmount || 0) - totalTrackedNet;
                 
                 const finalHistory: any[] = [...mappedTransactions];
                 
-                if (legacyAmount > 0.10) {
+                if (legacyAmount > 0.10) { 
                     finalHistory.push({
                         id: 'legacy-entry',
-                        amount: legacyAmount * 100, 
+                        netAmount: legacyAmount, 
+                        grossAmount: legacyAmount,
                         description: 'Saldo Anterior / Inicial',
                         date: goal.createdAt, 
                         source: 'LEGACY',
@@ -164,12 +227,11 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
     const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
     const linkedCarNames = vehicles.filter((v: any) => goal.linkedVehicleIds?.includes(v.id)).map((v: any) => v.name);
-    const formatVal = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            {/* Aumentado de max-w-lg para max-w-2xl para dar mais espaço */}
-            <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Adicionado overflow-hidden para corrigir bordas cortadas */}
+            <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
                 
                 {/* Header */}
                 <div className="p-6 border-b border-gray-800 relative">
@@ -245,33 +307,42 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                         ) : (
                             <div className="space-y-3">
                                 {history.map((item, idx) => {
-                                    const logos = getPlatformLogos(item.platform);
+                                    // AQUI: Usando a nova função que aceita o objeto item inteiro
+                                    const logos = getTransactionLogos(item);
+                                    // Verifica diferença significativa para exibir o bruto
+                                    const hasDifference = item.grossAmount && (item.grossAmount - item.netAmount) > 0.05;
                                     
                                     return (
                                         <div key={idx} className="flex items-center justify-between p-4 bg-gray-800/40 rounded-xl border border-gray-800/50 hover:bg-gray-800 transition-colors">
                                             <div className="flex items-center gap-4">
-                                                {/* 1. Ícone Fixo (Seta ou Carteira) */}
+                                                {/* 1. Ícone Fixo (TrendingUp ou Wallet) - Sempre Fixo à Esquerda */}
                                                 <div className={`w-10 h-10 flex items-center justify-center rounded-xl overflow-hidden shrink-0 ${item.source === 'TRANSACTION' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
                                                     {item.source === 'TRANSACTION' ? <TrendingUp size={20}/> : <Wallet size={20}/>}
                                                 </div>
                                                 
-                                                {/* 2. Detalhes com Logos Inline */}
+                                                {/* 2. Detalhes (Texto + Logos arredondadas à direita) */}
                                                 <div>
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        {/* Renderiza um ou mais logos */}
-                                                        {logos.length > 0 && logos.map((l: any) => (
-                                                            <img key={l.alt} src={l.src} alt={l.alt} className="w-5 h-5 object-contain" />
-                                                        ))}
-                                                        
-                                                        <p className="text-white font-bold text-sm">
+                                                    <div className="flex items-center gap-1 flex-wrap">
+                                                        <p className="text-white font-bold text-sm mr-1">
                                                             {item.source === 'TRANSACTION' ? 'Lucro com Corridas' : (item.description || 'Aporte Manual')}
                                                         </p>
+
+                                                        {/* Renderiza logos com sobreposição negativa para o segundo em diante */}
+                                                        {logos.length > 0 && logos.map((l: any, idxLogo) => (
+                                                            <div key={`${l.alt}-${idxLogo}`} className={`relative z-[${logos.length - idxLogo}] ${idxLogo > 0 ? '-ml-2' : ''}`}>
+                                                                <img 
+                                                                    src={l.src} 
+                                                                    alt={l.alt} 
+                                                                    className="w-5 h-5 object-contain rounded-full bg-gray-800 border border-gray-700" 
+                                                                />
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                     
                                                     {/* Data e ID discreto */}
                                                     <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                                                        {new Date(item.date).toLocaleDateString('pt-BR')} 
-                                                        {item.source === 'TRANSACTION' && (
+                                                        {item.date ? new Date(item.date).toLocaleDateString('pt-BR') : '-'} 
+                                                        {item.source === 'TRANSACTION' && item.id && (
                                                             <span className="bg-gray-800 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-700">
                                                                 #{item.id.slice(0, 6)}
                                                             </span>
@@ -280,23 +351,23 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                                                 </div>
                                             </div>
 
-                                            {/* 3. Valores (Líquido em Destaque) */}
+                                            {/* 3. Valores (Líquido em Destaque, Bruto em baixo) */}
                                             <div className="text-right">
-                                                {/* Valor Líquido (Real que soma na meta) */}
+                                                {/* Valor Líquido (Verdadeiro ganho somado na meta) */}
                                                 <span className="text-emerald-400 font-bold text-lg block leading-none">
-                                                    +{formatVal(item.amount / 100)} 
+                                                    +{formatVal(item.netAmount)} 
                                                 </span>
                                                 
-                                                {/* Valor Bruto (Discreto, abaixo, se existir) */}
-                                                {item.gross_amount && item.gross_amount > item.amount && (
-                                                    <span className="text-xs text-gray-500 block mt-1">
-                                                        Bruto: {formatVal(item.gross_amount / 100)}
+                                                {/* Valor Bruto (Secundário, apenas se diferente) */}
+                                                {item.source === 'TRANSACTION' && hasDifference && (
+                                                    <span className="text-[10px] text-gray-500 block mt-1 line-through opacity-70">
+                                                        Bruto: {formatVal(item.grossAmount)}
                                                     </span>
                                                 )}
                                                 
-                                                {/* Label visual caso não tenha bruto, para reforçar que é líquido */}
-                                                {item.source === 'TRANSACTION' && (!item.gross_amount || item.gross_amount <= item.amount) && (
-                                                    <span className="text-[10px] text-gray-600 block mt-1 uppercase font-bold tracking-wider">
+                                                {/* Label visual reforçando que é Líquido */}
+                                                {item.source === 'TRANSACTION' && (
+                                                    <span className="text-[10px] text-gray-600 block mt-0.5 uppercase font-bold tracking-wider">
                                                         Líquido
                                                     </span>
                                                 )}
