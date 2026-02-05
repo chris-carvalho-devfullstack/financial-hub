@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { 
   Target, Plus, Trash2, Trophy, Rocket, Calendar, 
   TrendingUp, CheckCircle2, Car, Filter, Check, AlertTriangle, 
-  DollarSign, X, History, Pencil, Wallet, ArrowRight, Info, Tag, PiggyBank
+  DollarSign, X, History, Pencil, Wallet, ArrowRight, Info, Tag, PiggyBank, HelpCircle
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
 import { Platform } from "~/types/enums";
@@ -71,10 +71,11 @@ function FeedbackModal({ isOpen, onClose, type, title, message }: any) {
   );
 }
 
-function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
+// Atualizado para aceitar zIndex customizado
+function ConfirmModal({ isOpen, onClose, onConfirm, title, message, zIndex = "z-[80]" }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200`}>
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
@@ -154,16 +155,22 @@ function InputModal({ isOpen, onClose, onConfirm, title, initialValue = 0 }: any
 }
 
 // === MODAL DE EDIÇÃO DE TRANSAÇÃO (Lápis) ===
-function EditTransactionModal({ isOpen, onClose, onConfirm, transaction }: any) {
+function EditTransactionModal({ isOpen, onClose, onConfirm, onRemove, transaction }: any) {
     const [value, setValue] = useState("");
+    const [showHelp, setShowHelp] = useState(false);
+    const [showConfirmRemove, setShowConfirmRemove] = useState(false); // Estado para o modal de confirmação
     
     useEffect(() => {
         if (isOpen && transaction) {
-            setValue(String(transaction.grossAmount || 0));
+            setValue(transaction.netAmount ? String(transaction.netAmount.toFixed(2)) : "0.00");
+            setShowHelp(false);
+            setShowConfirmRemove(false);
         }
     }, [isOpen, transaction]);
 
     if (!isOpen || !transaction) return null;
+
+    const isManual = transaction.source === 'MANUAL';
 
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -173,36 +180,89 @@ function EditTransactionModal({ isOpen, onClose, onConfirm, transaction }: any) 
     };
 
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
-            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
-                <div className="flex flex-col gap-4">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Pencil size={20} className="text-purple-500"/> Editar Valor
-                    </h3>
-                    
-                    {transaction.source === 'TRANSACTION' && (
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 flex items-start gap-2">
-                            <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5"/>
-                            <p className="text-yellow-200/70 text-xs">
-                                Atenção: Este valor veio dos seus Ganhos. Alterá-lo aqui atualizará o registro original no extrato.
-                            </p>
-                        </div>
-                    )}
+        <>
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+                <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
+                    <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
+                    <div className="flex flex-col gap-4">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            <Pencil size={20} className="text-purple-500"/> 
+                            {isManual ? 'Editar Aporte Manual' : 'Editar Valor para Meta'}
+                        </h3>
+                        
+                        {!isManual && (
+                            <>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold uppercase text-gray-500">Valor Original (Ganho):</span>
+                                    <span className="text-sm font-mono text-white bg-gray-800 px-2 py-0.5 rounded">
+                                        {formatVal(transaction.grossAmount)}
+                                    </span>
+                                </div>
 
-                    <form onSubmit={handleSubmit}>
-                        <div className="relative">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-500 font-bold text-lg">R$</span>
-                            <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-purple-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
-                        </div>
-                        <div className="flex gap-3 mt-6">
-                            <button type="button" onClick={onClose} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
-                            <button type="submit" className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl font-bold transition-colors">Salvar</button>
-                        </div>
-                    </form>
+                                <button 
+                                    onClick={() => setShowHelp(!showHelp)}
+                                    className="text-left text-xs bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 p-3 rounded-lg border border-blue-500/20 flex items-start gap-2 transition-colors"
+                                >
+                                    <Info size={16} className="shrink-0 mt-0.5"/>
+                                    <div>
+                                        <span className="font-bold block mb-1">Quando devo editar isso?</span>
+                                        {showHelp ? (
+                                            <p className="opacity-90 leading-relaxed">
+                                                Use isto quando parte do ganho foi gasta antes de chegar à meta.
+                                                <br/><br/>
+                                                Ex: Ganhou R$ 50 mas gastou R$ 20. Edite para R$ 30.
+                                                O ganho original permanece intacto.
+                                            </p>
+                                        ) : (
+                                            <span className="opacity-70">Clique para ver um exemplo prático.</span>
+                                        )}
+                                    </div>
+                                </button>
+                            </>
+                        )}
+
+                        <form onSubmit={handleSubmit}>
+                            <div className="relative mt-2">
+                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-500 font-bold text-lg">R$</span>
+                                <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-purple-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
+                            </div>
+                            
+                            <div className="flex flex-col gap-3 mt-6">
+                                <div className="flex gap-3">
+                                    <button type="button" onClick={onClose} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
+                                    <button type="submit" className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl font-bold transition-colors">Salvar</button>
+                                </div>
+
+                                {/* BOTÃO DE REMOVER: Agora abre o ConfirmModal */}
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowConfirmRemove(true)} 
+                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors text-sm font-bold"
+                                >
+                                    <Trash2 size={16} /> 
+                                    {isManual ? 'Excluir Aporte Manual' : 'Remover este lançamento da Meta'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {/* Modal de Confirmação Sobreposto (Z-90) */}
+            <ConfirmModal 
+                isOpen={showConfirmRemove}
+                zIndex="z-[90]"
+                title={isManual ? "Excluir Aporte?" : "Remover da Meta?"}
+                message={isManual 
+                    ? "Tem certeza? Este aporte manual será apagado permanentemente." 
+                    : "Tem certeza? Este ganho sairá da meta e voltará para o extrato geral."}
+                onClose={() => setShowConfirmRemove(false)}
+                onConfirm={() => {
+                    onRemove(transaction);
+                    onClose(); // Fecha o modal de edição
+                }}
+            />
+        </>
     );
 }
 
@@ -240,10 +300,18 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                     const isManual = t.platform === 'PARTICULAR' || (!t.vehicle_id && t.linked_goal_id);
 
                     const grossAmount = (t.amount || 0) / 100;
+                    
+                    // --- NOVA LÓGICA DE PRIORIDADE ---
                     let netAmount = grossAmount;
-                    let cost = 0;
+                    let isCustomNet = false; // Flag para saber se foi editado manualmente
 
-                    if (!isManual && t.distance && t.cluster_km_per_liter && t.cluster_km_per_liter > 0) {
+                    // 1. SE existe um valor personalizado no banco (coluna goal_net_amount), usa ele.
+                    if (t.goal_net_amount !== null && t.goal_net_amount !== undefined) {
+                        netAmount = t.goal_net_amount / 100;
+                        isCustomNet = true;
+                    } 
+                    // 2. SE NÃO, e for corrida de app com dados de consumo, calcula o custo
+                    else if (!isManual && t.distance && t.cluster_km_per_liter && t.cluster_km_per_liter > 0) {
                         const relevantFuel = fuelHistory.find(f => 
                             f.vehicle_id === t.vehicle_id && 
                             new Date(f.date) <= new Date(t.date)
@@ -252,7 +320,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                         const fuelPrice = relevantFuel?.price_per_liter || fuelHistory.find(f => f.vehicle_id === t.vehicle_id)?.price_per_liter || 0;
 
                         if (fuelPrice > 0) {
-                            cost = (t.distance / t.cluster_km_per_liter) * fuelPrice;
+                            const cost = (t.distance / t.cluster_km_per_liter) * fuelPrice;
                             netAmount = grossAmount - cost;
                         }
                     }
@@ -262,6 +330,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                         source: isManual ? 'MANUAL' : 'TRANSACTION',
                         netAmount, 
                         grossAmount,
+                        isCustomNet // Passamos essa flag adiante para a UI
                     };
                 });
                 
@@ -417,7 +486,9 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, o
                                             
                                             <div className="flex items-center gap-4">
                                                 <div className="text-right">
-                                                    <span className="text-emerald-400 font-bold text-lg block leading-none">
+                                                    <span className="text-emerald-400 font-bold text-lg block leading-none flex items-center justify-end gap-1">
+                                                        {/* Ícone de Lápis pequeno se for customizado */}
+                                                        {item.isCustomNet && <Pencil size={12} className="text-purple-400" />} 
                                                         +{formatVal(item.netAmount)} 
                                                     </span>
                                                     {item.source === 'TRANSACTION' && hasDifference && (
@@ -648,8 +719,6 @@ export default function MetasPage() {
     if (goalToDeleteId && currentUser) {
       try {
           // PASSO 1: Salvar os Ganhos Reais (Desvincular)
-          // Atualiza transações que NÃO são manuais (aquelas que têm vehicle_id ou platform diferente de PARTICULAR)
-          // Removemos o ID da meta, mas mantemos o registro financeiro vivo.
           const { error: unlinkError } = await supabase
               .from("transactions")
               .update({ linked_goal_id: null })
@@ -659,8 +728,6 @@ export default function MetasPage() {
           if (unlinkError) throw unlinkError;
 
           // PASSO 2: Apagar Aportes Manuais
-          // Agora sim, apagamos o que é "dinheiro guardado manualmente" (Platform == PARTICULAR)
-          // Pois se a meta acabou, esse "envelope" de dinheiro virtual deixa de existir.
           const { error: deleteManualError } = await supabase
               .from("transactions")
               .delete()
@@ -670,7 +737,6 @@ export default function MetasPage() {
           if (deleteManualError) throw deleteManualError;
 
           // PASSO 3: Apagar a Meta
-          // Agora que não há mais nada prendendo a meta (nem ganhos vinculados, nem aportes manuais), podemos apagar.
           const { error } = await supabase.from("goals").delete().eq("id", goalToDeleteId);
           
           if (error) throw error;
@@ -686,40 +752,114 @@ export default function MetasPage() {
     }
   };
 
-  const handleUpdateTransaction = async (transaction: any, newValue: number) => {
+  const handleUpdateTransaction = async (transaction: any, newNetValue: number) => {
       if (!currentUser || !selectedGoal) return;
       
-      const newGrossAmount = newValue;
-      const oldGrossAmount = transaction.grossAmount || 0;
-      const delta = newGrossAmount - oldGrossAmount;
+      // CORREÇÃO: newNetValue já vem do input como Reais (ex: 10.00)
+      const currentNetValue = transaction.netAmount || 0; 
+      
+      const delta = newNetValue - currentNetValue;
       
       if (Math.abs(delta) < 0.01) return;
 
       try {
+          // 1. Atualiza APENAS a coluna 'goal_net_amount' (guardando em CENTAVOS)
+          // A coluna 'amount' (Bruto) permanece intacta
           const { error: txError } = await supabase
               .from("transactions")
-              .update({ amount: Math.round(newGrossAmount * 100) })
+              .update({ goal_net_amount: Math.round(newNetValue * 100) }) 
               .eq("id", transaction.id);
 
           if (txError) throw txError;
 
-          const newGoalCurrentAmount = selectedGoal.currentAmount + delta;
-          const newStatus = newGoalCurrentAmount >= selectedGoal.targetAmount ? 'COMPLETED' : 'ACTIVE';
+          // 2. Atualiza o Total da Meta (A meta já está em REAIS no estado)
+          // Somamos o delta direto (ex: +5.00) e não convertido
+          const currentGoalTotal = selectedGoal.currentAmount || 0;
+          const newGoalTotal = currentGoalTotal + delta;
+
+          const newStatus = newGoalTotal >= selectedGoal.targetAmount ? 'COMPLETED' : 'ACTIVE';
 
           const { error: goalError } = await supabase
               .from("goals")
               .update({ 
-                  current_amount: newGoalCurrentAmount,
+                  current_amount: newGoalTotal,
                   status: newStatus
               })
               .eq("id", selectedGoal.id);
 
           if (goalError) throw goalError;
 
-          setFeedback({ type: 'success', title: 'Atualizado', message: 'Valor do aporte corrigido com sucesso.' });
+          setFeedback({ type: 'success', title: 'Atualizado', message: 'Valor considerado para a meta foi ajustado. O ganho original foi mantido.' });
           
           await fetchAllData(currentUser.id);
-          setSelectedGoal(prev => prev ? { ...prev, currentAmount: newGoalCurrentAmount, status: newStatus as any } : null);
+          
+          // Atualização otimista da UI
+          setSelectedGoal(prev => prev ? { ...prev, currentAmount: newGoalTotal, status: newStatus as any } : null);
+
+      } catch (error: any) {
+          setFeedback({ type: 'error', title: 'Erro', message: error.message });
+      }
+  };
+
+  const handleRemoveFromGoal = async (transaction: any) => {
+      if (!currentUser || !selectedGoal) return;
+
+      // Valor que será subtraído da meta (já está em Reais)
+      const amountToRemove = transaction.netAmount || 0;
+      const isManual = transaction.source === 'MANUAL';
+
+      try {
+          // 1. AÇÃO NO BANCO DE DADOS
+          if (isManual) {
+              // SE FOR MANUAL: Deleta o registro definitivamente
+              const { error: delError } = await supabase
+                  .from("transactions")
+                  .delete()
+                  .eq("id", transaction.id);
+              
+              if (delError) throw delError;
+
+          } else {
+              // SE FOR GANHO DE CORRIDA: Apenas desvincula (Update)
+              const { error: upError } = await supabase
+                  .from("transactions")
+                  .update({ 
+                      linked_goal_id: null, 
+                      goal_net_amount: null 
+                  })
+                  .eq("id", transaction.id);
+
+              if (upError) throw upError;
+          }
+
+          // 2. Atualiza o saldo da Meta
+          const currentGoalTotal = selectedGoal.currentAmount || 0;
+          const newGoalTotal = Math.max(0, currentGoalTotal - amountToRemove); // Evita negativo
+
+          // Recalcula status
+          const newStatus = newGoalTotal >= selectedGoal.targetAmount ? 'COMPLETED' : 'ACTIVE';
+
+          const { error: goalError } = await supabase
+              .from("goals")
+              .update({ 
+                  current_amount: newGoalTotal,
+                  status: newStatus
+              })
+              .eq("id", selectedGoal.id);
+
+          if (goalError) throw goalError;
+
+          // Feedback visual
+          const msg = isManual 
+              ? 'Aporte manual excluído com sucesso.' 
+              : 'Lançamento desvinculado. Ele voltou para seu extrato de ganhos.';
+
+          setFeedback({ type: 'success', title: 'Removido', message: msg });
+          
+          await fetchAllData(currentUser.id);
+          
+          // Atualiza a UI imediatamente
+          setSelectedGoal(prev => prev ? { ...prev, currentAmount: newGoalTotal, status: newStatus as any } : null);
 
       } catch (error: any) {
           setFeedback({ type: 'error', title: 'Erro', message: error.message });
@@ -730,14 +870,13 @@ export default function MetasPage() {
   const registerDeposit = async (goal: Goal, amountVal: number, depositDesc: string) => {
       if (!currentUser) return;
       
-      // Mudado de DEPOSIT para INCOME para evitar erro de constraint
       const { error: txError } = await supabase.from("transactions").insert({
           user_id: currentUser.id,
           vehicle_id: null, 
           linked_goal_id: goal.id,
           amount: Math.round(amountVal * 100),
           date: new Date().toISOString(),
-          type: 'INCOME',  // <--- CORREÇÃO AQUI
+          type: 'INCOME', 
           description: depositDesc,
           platform: Platform.PARTICULAR,
           created_at: new Date().toISOString()
@@ -757,7 +896,6 @@ export default function MetasPage() {
       await fetchAllData(currentUser.id);
   };
 
-  // Abre o modal para aporte (seja manual ou clique rápido)
   const openDepositModal = (goal: Goal, initialVal: number = 0) => {
       setDepositTargetGoal(goal);
       setDepositInitialValue(initialVal);
@@ -791,7 +929,6 @@ export default function MetasPage() {
       <FeedbackModal isOpen={!!feedback} onClose={() => setFeedback(null)} type={feedback?.type} title={feedback?.title} message={feedback?.message} />
       <ConfirmModal isOpen={!!goalToDeleteId} onClose={() => setGoalToDeleteId(null)} onConfirm={handleDeleteConfirm} title="Excluir Meta?" message="Isso apagará todo o histórico deste objetivo." />
       
-      {/* NOVO MODAL DE APORTE */}
       <InputModal 
           isOpen={isDepositModalOpen} 
           onClose={() => setIsDepositModalOpen(false)} 
@@ -805,6 +942,7 @@ export default function MetasPage() {
         onClose={() => setTransactionToEdit(null)} 
         transaction={transactionToEdit}
         onConfirm={handleUpdateTransaction}
+        onRemove={handleRemoveFromGoal}
       />
 
       <GoalDetailsModal 
@@ -834,7 +972,6 @@ export default function MetasPage() {
         </div>
       </header>
 
-      {/* Botão Mobile para Nova Meta */}
       <div className="mb-6 lg:hidden">
         <button 
           onClick={() => { resetForm(); setEditingGoal(null); setMobileFormOpen(true); }}
@@ -907,8 +1044,8 @@ export default function MetasPage() {
                   <input type="number" required value={targetAmount} onChange={e => setTargetAmount(e.target.value)} className={`w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-emerald-400 font-bold outline-none ${noSpinnerClass}`} placeholder="0.00" />
                 </div>
                 <div>
-                   <label className="block text-xs uppercase font-bold text-gray-500 mb-1">Atual (R$)</label>
-                   <input type="number" value={currentAmount} onChange={e => setCurrentAmount(e.target.value)} className={`w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none ${noSpinnerClass}`} placeholder="Opcional" />
+                    <label className="block text-xs uppercase font-bold text-gray-500 mb-1">Atual (R$)</label>
+                    <input type="number" value={currentAmount} onChange={e => setCurrentAmount(e.target.value)} className={`w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none ${noSpinnerClass}`} placeholder="Opcional" />
                 </div>
               </div>
 
@@ -994,7 +1131,6 @@ export default function MetasPage() {
                     <div className="flex gap-2 mt-4 pt-4 border-t border-gray-800">
                         <p className="text-[10px] text-gray-500 self-center mr-auto uppercase font-bold hidden sm:block">Aportar:</p>
                         
-                        {/* BOTÕES RÁPIDOS AGORA ABREM MODAL PARA NOMEAR */}
                         {[50, 100, 500].map(val => (
                             <button key={val} onClick={(e) => { e.stopPropagation(); openDepositModal(goal, val); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600 hover:text-white text-emerald-500 text-xs font-bold border border-gray-700 transition-all flex items-center gap-1 shadow-sm active:scale-95">
                                 <TrendingUp size={12}/> +{val}

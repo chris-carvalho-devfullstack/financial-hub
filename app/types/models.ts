@@ -49,7 +49,13 @@ export interface BaseTransaction {
   id: string;
   userId: string;
   vehicleId: string;
-  amount: number; // em centavos
+  amount: number; // em centavos (Valor Bruto / Real)
+  
+  // === NOVO CAMPO ===
+  // Permite definir um valor líquido específico para contar na meta
+  // Se undefined, o sistema calcula automático ou usa o bruto.
+  goalNetAmount?: number; 
+
   date: string;   // ISO date
   odometer?: number; // Snapshot do odômetro no momento
   description?: string; // Observação geral
