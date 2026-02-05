@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { 
   Target, Plus, Trash2, Trophy, Rocket, Calendar, 
   TrendingUp, CheckCircle2, Car, Filter, Check, AlertTriangle, 
-  DollarSign, X, History, Pencil, Wallet, ArrowRight, Info
+  DollarSign, X, History, Pencil, Wallet, ArrowRight, Info, Tag, PiggyBank
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
 import { Platform } from "~/types/enums";
@@ -15,13 +15,11 @@ import type { User } from "@supabase/supabase-js";
 const noSpinnerClass = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
 // === HELPERS ===
-// Helper robusto para pegar logos baseado na transação (suporta MULTIPLE e Enums)
 const getTransactionLogos = (transaction: any) => {
   if (!transaction) return [];
   const logos: { src: string; alt: string }[] = [];
   const platformsToCheck: string[] = [];
 
-  // Se for MULTIPLE, pega do split. Se não, pega da plataforma raiz.
   if (transaction.platform === 'MULTIPLE' && Array.isArray(transaction.split)) {
       platformsToCheck.push(...transaction.split.map((s: any) => s.platform));
   } else if (transaction.platform) {
@@ -46,7 +44,6 @@ const getTransactionLogos = (transaction: any) => {
   return logos;
 };
 
-// Helper seguro para formatar moeda (evita o crash com undefined)
 const formatVal = (val: number | undefined | null) => {
     const v = val ?? 0;
     return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -57,7 +54,7 @@ function FeedbackModal({ isOpen, onClose, type, title, message }: any) {
   if (!isOpen) return null;
   const isSuccess = type === 'success';
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className={`bg-gray-900 border ${isSuccess ? 'border-emerald-500/30' : 'border-red-500/30'} rounded-2xl p-6 max-w-sm w-full shadow-2xl transform scale-100 transition-all`}>
         <div className="flex flex-col items-center text-center">
           <div className={`h-16 w-16 rounded-full flex items-center justify-center mb-4 ${isSuccess ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -77,7 +74,7 @@ function FeedbackModal({ isOpen, onClose, type, title, message }: any) {
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
         <div className="flex items-start gap-4">
           <div className="bg-red-500/10 p-3 rounded-full">
@@ -97,32 +94,57 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }: any) {
   );
 }
 
-function InputModal({ isOpen, onClose, onConfirm, title }: any) {
+// === NOVO MODAL DE APORTE (Com Descrição e Valor) ===
+function InputModal({ isOpen, onClose, onConfirm, title, initialValue = 0 }: any) {
   const [value, setValue] = useState("");
+  const [description, setDescription] = useState("Aporte Manual");
+
+  useEffect(() => {
+    if (isOpen) {
+        setValue(initialValue > 0 ? String(initialValue) : "");
+        setDescription("Aporte Manual");
+    }
+  }, [isOpen, initialValue]);
+
   if (!isOpen) return null;
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!value) return;
-    onConfirm(Number(value));
+    onConfirm(Number(value), description);
     setValue("");
     onClose();
   };
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
       <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
          <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
          <div className="flex flex-col gap-4">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-               <DollarSign size={20} className="text-emerald-500"/> {title}
+               <PiggyBank size={24} className="text-emerald-500"/> {title}
             </h3>
-            <form onSubmit={handleSubmit}>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-lg">R$</span>
-                <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-emerald-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              
+              <div>
+                <label className="text-xs uppercase text-gray-500 font-bold mb-1 block">Valor</label>
+                <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-lg">R$</span>
+                    <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-3 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-emerald-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
+                </div>
               </div>
+
+              <div>
+                <label className="text-xs uppercase text-gray-500 font-bold mb-1 block">Nome do Lançamento</label>
+                <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"><Tag size={18}/></span>
+                    <input type="text" required value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-xl py-3 pl-12 pr-4 text-white font-medium outline-none focus:border-emerald-500 placeholder-gray-600" placeholder="Ex: Economia extra"/>
+                </div>
+              </div>
+
               <div className="flex gap-3 mt-6">
                 <button type="button" onClick={() => { setValue(""); onClose(); }} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
-                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors">Adicionar</button>
+                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-colors">Confirmar</button>
               </div>
             </form>
          </div>
@@ -131,8 +153,60 @@ function InputModal({ isOpen, onClose, onConfirm, title }: any) {
   );
 }
 
-// === MODAL DE DETALHES (CORRIGIDO) ===
-function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }: any) {
+// === MODAL DE EDIÇÃO DE TRANSAÇÃO (Lápis) ===
+function EditTransactionModal({ isOpen, onClose, onConfirm, transaction }: any) {
+    const [value, setValue] = useState("");
+    
+    useEffect(() => {
+        if (isOpen && transaction) {
+            setValue(String(transaction.grossAmount || 0));
+        }
+    }, [isOpen, transaction]);
+
+    if (!isOpen || !transaction) return null;
+
+    const handleSubmit = (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!value) return;
+        onConfirm(transaction, Number(value));
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+            <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
+                <div className="flex flex-col gap-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Pencil size={20} className="text-purple-500"/> Editar Valor
+                    </h3>
+                    
+                    {transaction.source === 'TRANSACTION' && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 flex items-start gap-2">
+                            <AlertTriangle size={16} className="text-yellow-500 shrink-0 mt-0.5"/>
+                            <p className="text-yellow-200/70 text-xs">
+                                Atenção: Este valor veio dos seus Ganhos. Alterá-lo aqui atualizará o registro original no extrato.
+                            </p>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSubmit}>
+                        <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-500 font-bold text-lg">R$</span>
+                            <input type="number" autoFocus required step="0.01" min="0" value={value} onChange={e => setValue(e.target.value)} className={`w-full bg-gray-800 border border-gray-600 rounded-xl py-4 pl-12 pr-4 text-white text-xl font-bold outline-none focus:border-purple-500 placeholder-gray-600 ${noSpinnerClass}`} placeholder="0.00"/>
+                        </div>
+                        <div className="flex gap-3 mt-6">
+                            <button type="button" onClick={onClose} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors">Cancelar</button>
+                            <button type="submit" className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl font-bold transition-colors">Salvar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit, onEditTransaction }: any) {
     const [history, setHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -150,8 +224,6 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
                 if (error) throw error;
 
-                // Busca histórico de combustível para calcular custo exato na época
-                // Necessário para encontrar o preço do litro na data do ganho
                 let fuelHistory: any[] = [];
                 if (goal.linkedVehicleIds && goal.linkedVehicleIds.length > 0) {
                     const { data: fuels } = await supabase
@@ -164,20 +236,19 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                 }
                 
                 const mappedTransactions: any[] = (linkedTransactions || []).map(t => {
-                    // O banco guarda amount em centavos (integer), converte para reais
+                    // Identificando se é manual: Platform é PARTICULAR ou vehicle_id é nulo quando vinculado a meta
+                    const isManual = t.platform === 'PARTICULAR' || (!t.vehicle_id && t.linked_goal_id);
+
                     const grossAmount = (t.amount || 0) / 100;
                     let netAmount = grossAmount;
                     let cost = 0;
 
-                    // Cálculo do Líquido (se houver dados suficientes)
-                    if (t.type === 'INCOME' && t.distance && t.cluster_km_per_liter && t.cluster_km_per_liter > 0) {
-                        // Encontra o abastecimento relevante (data anterior ou igual)
+                    if (!isManual && t.distance && t.cluster_km_per_liter && t.cluster_km_per_liter > 0) {
                         const relevantFuel = fuelHistory.find(f => 
                             f.vehicle_id === t.vehicle_id && 
                             new Date(f.date) <= new Date(t.date)
                         );
                         
-                        // Fallback: se não achar anterior, pega o mais recente disponível
                         const fuelPrice = relevantFuel?.price_per_liter || fuelHistory.find(f => f.vehicle_id === t.vehicle_id)?.price_per_liter || 0;
 
                         if (fuelPrice > 0) {
@@ -188,13 +259,12 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
                     return { 
                         ...t, 
-                        source: t.type === 'INCOME' ? 'TRANSACTION' : 'MANUAL',
-                        netAmount,   // Valor Líquido para exibição em destaque
-                        grossAmount, // Valor Bruto para exibição secundária
+                        source: isManual ? 'MANUAL' : 'TRANSACTION',
+                        netAmount, 
+                        grossAmount,
                     };
                 });
                 
-                // Calcula saldo anterior (Legacy) baseando-se no valor líquido acumulado
                 const totalTrackedNet = mappedTransactions.reduce((acc, curr) => acc + curr.netAmount, 0);
                 const legacyAmount = (goal.currentAmount || 0) - totalTrackedNet;
                 
@@ -230,9 +300,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            {/* Adicionado overflow-hidden para corrigir bordas cortadas */}
             <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-                
                 {/* Header */}
                 <div className="p-6 border-b border-gray-800 relative">
                     <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-gray-800 hover:bg-gray-700 rounded-full transition-colors text-white"><X size={20}/></button>
@@ -264,7 +332,6 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
 
                 {/* Body - Stats & Extrato */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-                    
                     {/* Card Principal */}
                     <div className="bg-gray-800/50 rounded-2xl p-5 border border-gray-700">
                         <div className="flex justify-between items-end mb-2">
@@ -307,39 +374,36 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                         ) : (
                             <div className="space-y-3">
                                 {history.map((item, idx) => {
-                                    // AQUI: Usando a nova função que aceita o objeto item inteiro
                                     const logos = getTransactionLogos(item);
-                                    // Verifica diferença significativa para exibir o bruto
                                     const hasDifference = item.grossAmount && (item.grossAmount - item.netAmount) > 0.05;
+                                    const isEditable = item.source !== 'LEGACY';
                                     
                                     return (
-                                        <div key={idx} className="flex items-center justify-between p-4 bg-gray-800/40 rounded-xl border border-gray-800/50 hover:bg-gray-800 transition-colors">
+                                        <div key={idx} className="relative flex items-center justify-between p-4 bg-gray-800/40 rounded-xl border border-gray-800/50 hover:bg-gray-800 transition-colors group">
                                             <div className="flex items-center gap-4">
-                                                {/* 1. Ícone Fixo (TrendingUp ou Wallet) - Sempre Fixo à Esquerda */}
                                                 <div className={`w-10 h-10 flex items-center justify-center rounded-xl overflow-hidden shrink-0 ${item.source === 'TRANSACTION' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
                                                     {item.source === 'TRANSACTION' ? <TrendingUp size={20}/> : <Wallet size={20}/>}
                                                 </div>
-                                                
-                                                {/* 2. Detalhes (Texto + Logos arredondadas à direita) */}
                                                 <div>
                                                     <div className="flex items-center gap-1 flex-wrap">
                                                         <p className="text-white font-bold text-sm mr-1">
                                                             {item.source === 'TRANSACTION' ? 'Lucro com Corridas' : (item.description || 'Aporte Manual')}
                                                         </p>
-
-                                                        {/* Renderiza logos com sobreposição negativa para o segundo em diante */}
                                                         {logos.length > 0 && logos.map((l: any, idxLogo) => (
                                                             <div key={`${l.alt}-${idxLogo}`} className={`relative z-[${logos.length - idxLogo}] ${idxLogo > 0 ? '-ml-2' : ''}`}>
-                                                                <img 
-                                                                    src={l.src} 
-                                                                    alt={l.alt} 
-                                                                    className="w-5 h-5 object-contain rounded-full bg-gray-800 border border-gray-700" 
-                                                                />
+                                                                    <img src={l.src} alt={l.alt} className="w-5 h-5 object-contain rounded-full bg-gray-800 border border-gray-700" />
                                                             </div>
                                                         ))}
                                                     </div>
-                                                    
-                                                    {/* Data e ID discreto */}
+
+                                                    {/* TAG DE APORTE MANUAL EM MINIATURA */}
+                                                    {item.source === 'MANUAL' && (
+                                                        <div className="flex items-center gap-1 mt-1 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5 w-fit">
+                                                            <Wallet size={10} className="text-blue-400"/>
+                                                            <span className="text-[10px] font-bold text-blue-300 uppercase">Manual</span>
+                                                        </div>
+                                                    )}
+
                                                     <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
                                                         {item.date ? new Date(item.date).toLocaleDateString('pt-BR') : '-'} 
                                                         {item.source === 'TRANSACTION' && item.id && (
@@ -350,26 +414,27 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                                                     </p>
                                                 </div>
                                             </div>
+                                            
+                                            <div className="flex items-center gap-4">
+                                                <div className="text-right">
+                                                    <span className="text-emerald-400 font-bold text-lg block leading-none">
+                                                        +{formatVal(item.netAmount)} 
+                                                    </span>
+                                                    {item.source === 'TRANSACTION' && hasDifference && (
+                                                        <span className="text-[10px] text-gray-500 block mt-1 line-through opacity-70">
+                                                            Bruto: {formatVal(item.grossAmount)}
+                                                        </span>
+                                                    )}
+                                                </div>
 
-                                            {/* 3. Valores (Líquido em Destaque, Bruto em baixo) */}
-                                            <div className="text-right">
-                                                {/* Valor Líquido (Verdadeiro ganho somado na meta) */}
-                                                <span className="text-emerald-400 font-bold text-lg block leading-none">
-                                                    +{formatVal(item.netAmount)} 
-                                                </span>
-                                                
-                                                {/* Valor Bruto (Secundário, apenas se diferente) */}
-                                                {item.source === 'TRANSACTION' && hasDifference && (
-                                                    <span className="text-[10px] text-gray-500 block mt-1 line-through opacity-70">
-                                                        Bruto: {formatVal(item.grossAmount)}
-                                                    </span>
-                                                )}
-                                                
-                                                {/* Label visual reforçando que é Líquido */}
-                                                {item.source === 'TRANSACTION' && (
-                                                    <span className="text-[10px] text-gray-600 block mt-0.5 uppercase font-bold tracking-wider">
-                                                        Líquido
-                                                    </span>
+                                                {isEditable && (
+                                                    <button 
+                                                        onClick={() => onEditTransaction(item)}
+                                                        className="p-2 rounded-lg bg-gray-700/50 hover:bg-purple-500 hover:text-white text-gray-400 transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                                                        title="Editar valor deste aporte"
+                                                    >
+                                                        <Pencil size={14} />
+                                                    </button>
                                                 )}
                                             </div>
                                         </div>
@@ -385,7 +450,7 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
                         onClick={() => { onClose(); onEdit(goal); }}
                         className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 border border-gray-700"
                     >
-                        <Pencil size={18}/> Editar
+                        <Pencil size={18}/> Editar Meta
                     </button>
                     <button 
                         onClick={() => { onClose(); onDelete(goal.id); }}
@@ -399,7 +464,6 @@ function GoalDetailsModal({ isOpen, onClose, goal, vehicles, onDelete, onEdit }:
     );
 }
 
-
 // === PÁGINA PRINCIPAL ===
 
 export default function MetasPage() {
@@ -409,11 +473,18 @@ export default function MetasPage() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Estados de UI
+  const [mobileFormOpen, setMobileFormOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error', title: string, message: string } | null>(null);
   const [goalToDeleteId, setGoalToDeleteId] = useState<string | null>(null);
-  const [goalToAddAmount, setGoalToAddAmount] = useState<Goal | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null); 
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null); 
+  const [transactionToEdit, setTransactionToEdit] = useState<any | null>(null);
+
+  // Estados para Aporte (Agora com Valor inicial)
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [depositInitialValue, setDepositInitialValue] = useState(0);
+  const [depositTargetGoal, setDepositTargetGoal] = useState<Goal | null>(null);
 
   const [filterVehicleId, setFilterVehicleId] = useState<string>("ALL");
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
@@ -502,12 +573,18 @@ export default function MetasPage() {
       setPurpose(goal.purpose || "");
       setDeadline(goal.deadline || "");
       setSelectedVehicleIds(goal.linkedVehicleIds || []);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      if (window.innerWidth < 1024) {
+        setMobileFormOpen(true);
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
   };
 
   const handleCancelEdit = () => {
       setEditingGoal(null);
       resetForm();
+      setMobileFormOpen(false); 
   };
 
   const resetForm = () => {
@@ -556,6 +633,7 @@ export default function MetasPage() {
       if (error) throw error;
 
       resetForm();
+      setMobileFormOpen(false); 
       await fetchAllData(currentUser.id);
 
     } catch (error: any) {
@@ -569,27 +647,98 @@ export default function MetasPage() {
   const handleDeleteConfirm = async () => {
     if (goalToDeleteId && currentUser) {
       try {
+          // PASSO 1: Salvar os Ganhos Reais (Desvincular)
+          // Atualiza transações que NÃO são manuais (aquelas que têm vehicle_id ou platform diferente de PARTICULAR)
+          // Removemos o ID da meta, mas mantemos o registro financeiro vivo.
+          const { error: unlinkError } = await supabase
+              .from("transactions")
+              .update({ linked_goal_id: null })
+              .eq("linked_goal_id", goalToDeleteId)
+              .neq("platform", "PARTICULAR"); // Protege o que não é manual
+
+          if (unlinkError) throw unlinkError;
+
+          // PASSO 2: Apagar Aportes Manuais
+          // Agora sim, apagamos o que é "dinheiro guardado manualmente" (Platform == PARTICULAR)
+          // Pois se a meta acabou, esse "envelope" de dinheiro virtual deixa de existir.
+          const { error: deleteManualError } = await supabase
+              .from("transactions")
+              .delete()
+              .eq("linked_goal_id", goalToDeleteId)
+              .eq("platform", "PARTICULAR");
+
+          if (deleteManualError) throw deleteManualError;
+
+          // PASSO 3: Apagar a Meta
+          // Agora que não há mais nada prendendo a meta (nem ganhos vinculados, nem aportes manuais), podemos apagar.
           const { error } = await supabase.from("goals").delete().eq("id", goalToDeleteId);
+          
           if (error) throw error;
+          
           setGoalToDeleteId(null);
+          setFeedback({ type: 'success', title: 'Meta Excluída', message: 'Meta removida. Seus ganhos de corridas foram preservados no extrato.' });
+          
           await fetchAllData(currentUser.id);
       } catch (error: any) {
-          setFeedback({ type: 'error', title: 'Erro', message: error.message });
+          console.error("Erro ao excluir:", error);
+          setFeedback({ type: 'error', title: 'Erro', message: error.message || "Não foi possível excluir a meta." });
       }
     }
   };
 
-  const registerDeposit = async (goal: Goal, amountVal: number) => {
+  const handleUpdateTransaction = async (transaction: any, newValue: number) => {
+      if (!currentUser || !selectedGoal) return;
+      
+      const newGrossAmount = newValue;
+      const oldGrossAmount = transaction.grossAmount || 0;
+      const delta = newGrossAmount - oldGrossAmount;
+      
+      if (Math.abs(delta) < 0.01) return;
+
+      try {
+          const { error: txError } = await supabase
+              .from("transactions")
+              .update({ amount: Math.round(newGrossAmount * 100) })
+              .eq("id", transaction.id);
+
+          if (txError) throw txError;
+
+          const newGoalCurrentAmount = selectedGoal.currentAmount + delta;
+          const newStatus = newGoalCurrentAmount >= selectedGoal.targetAmount ? 'COMPLETED' : 'ACTIVE';
+
+          const { error: goalError } = await supabase
+              .from("goals")
+              .update({ 
+                  current_amount: newGoalCurrentAmount,
+                  status: newStatus
+              })
+              .eq("id", selectedGoal.id);
+
+          if (goalError) throw goalError;
+
+          setFeedback({ type: 'success', title: 'Atualizado', message: 'Valor do aporte corrigido com sucesso.' });
+          
+          await fetchAllData(currentUser.id);
+          setSelectedGoal(prev => prev ? { ...prev, currentAmount: newGoalCurrentAmount, status: newStatus as any } : null);
+
+      } catch (error: any) {
+          setFeedback({ type: 'error', title: 'Erro', message: error.message });
+      }
+  };
+
+  // === REGISTRO DE APORTE (CORRIGIDO PARA TYPE 'INCOME') ===
+  const registerDeposit = async (goal: Goal, amountVal: number, depositDesc: string) => {
       if (!currentUser) return;
       
+      // Mudado de DEPOSIT para INCOME para evitar erro de constraint
       const { error: txError } = await supabase.from("transactions").insert({
           user_id: currentUser.id,
           vehicle_id: null, 
           linked_goal_id: goal.id,
           amount: Math.round(amountVal * 100),
           date: new Date().toISOString(),
-          type: 'DEPOSIT', 
-          description: 'Aporte Manual',
+          type: 'INCOME',  // <--- CORREÇÃO AQUI
+          description: depositDesc,
           platform: Platform.PARTICULAR,
           created_at: new Date().toISOString()
       });
@@ -608,24 +757,23 @@ export default function MetasPage() {
       await fetchAllData(currentUser.id);
   };
 
-  const handleManualAdd = async (val: number) => {
-      if (goalToAddAmount && val > 0) {
+  // Abre o modal para aporte (seja manual ou clique rápido)
+  const openDepositModal = (goal: Goal, initialVal: number = 0) => {
+      setDepositTargetGoal(goal);
+      setDepositInitialValue(initialVal);
+      setIsDepositModalOpen(true);
+  };
+
+  const handleConfirmDeposit = async (val: number, desc: string) => {
+      if (depositTargetGoal && val > 0) {
           try {
-              await registerDeposit(goalToAddAmount, val);
-              setGoalToAddAmount(null);
+              await registerDeposit(depositTargetGoal, val, desc);
+              setIsDepositModalOpen(false);
+              setDepositTargetGoal(null);
               setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados à meta.` });
           } catch (error: any) {
               setFeedback({ type: 'error', title: 'Erro', message: error.message });
           }
-      }
-  };
-
-  const handleQuickAdd = async (goal: Goal, val: number) => {
-      try {
-          await registerDeposit(goal, val);
-          setFeedback({ type: 'success', title: 'Aporte Realizado!', message: `R$ ${val.toLocaleString('pt-BR')} adicionados.` });
-      } catch (error: any) {
-          setFeedback({ type: 'error', title: 'Erro', message: error.message });
       }
   };
 
@@ -642,8 +790,23 @@ export default function MetasPage() {
     <div className="pb-20 animate-fade-in max-w-7xl mx-auto px-4">
       <FeedbackModal isOpen={!!feedback} onClose={() => setFeedback(null)} type={feedback?.type} title={feedback?.title} message={feedback?.message} />
       <ConfirmModal isOpen={!!goalToDeleteId} onClose={() => setGoalToDeleteId(null)} onConfirm={handleDeleteConfirm} title="Excluir Meta?" message="Isso apagará todo o histórico deste objetivo." />
-      <InputModal isOpen={!!goalToAddAmount} onClose={() => setGoalToAddAmount(null)} onConfirm={handleManualAdd} title="Adicionar Aporte Manual" />
       
+      {/* NOVO MODAL DE APORTE */}
+      <InputModal 
+          isOpen={isDepositModalOpen} 
+          onClose={() => setIsDepositModalOpen(false)} 
+          onConfirm={handleConfirmDeposit} 
+          title="Novo Aporte"
+          initialValue={depositInitialValue}
+      />
+      
+      <EditTransactionModal 
+        isOpen={!!transactionToEdit} 
+        onClose={() => setTransactionToEdit(null)} 
+        transaction={transactionToEdit}
+        onConfirm={handleUpdateTransaction}
+      />
+
       <GoalDetailsModal 
         isOpen={!!selectedGoal} 
         onClose={() => setSelectedGoal(null)} 
@@ -651,6 +814,7 @@ export default function MetasPage() {
         vehicles={vehicles}
         onDelete={(id: string) => setGoalToDeleteId(id)}
         onEdit={handleEditInit}
+        onEditTransaction={(tx: any) => setTransactionToEdit(tx)} 
       />
 
       <header className="mb-8 mt-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -670,9 +834,33 @@ export default function MetasPage() {
         </div>
       </header>
 
+      {/* Botão Mobile para Nova Meta */}
+      <div className="mb-6 lg:hidden">
+        <button 
+          onClick={() => { resetForm(); setEditingGoal(null); setMobileFormOpen(true); }}
+          className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 p-4 rounded-2xl flex items-center justify-center gap-2 text-white font-bold shadow-lg shadow-emerald-900/20 active:scale-95 transition-all"
+        >
+          <Plus size={24} /> Nova Meta
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1">
-          <div className={`p-6 rounded-2xl border sticky top-4 shadow-xl transition-colors ${editingGoal ? 'bg-purple-900/10 border-purple-500/30' : 'bg-gray-900 border-gray-800'}`}>
+        <div className={`
+          ${mobileFormOpen 
+             ? 'fixed inset-0 z-[100] bg-gray-900/95 backdrop-blur-sm p-4 overflow-y-auto flex items-center justify-center animate-in slide-in-from-bottom-10 fade-in' 
+             : 'hidden'
+          } 
+          lg:block lg:static lg:bg-transparent lg:p-0 lg:h-auto lg:col-span-1 lg:overflow-visible lg:flex-none
+        `}>
+          <div className={`p-6 rounded-2xl border transition-colors relative w-full max-w-lg lg:max-w-none shadow-2xl lg:shadow-xl lg:sticky lg:top-4 bg-gray-900 border-gray-800 ${editingGoal ? 'lg:bg-purple-900/10 lg:border-purple-500/30' : ''}`}>
+            
+            <button 
+               onClick={() => setMobileFormOpen(false)} 
+               className="lg:hidden absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-gray-400 hover:text-white"
+            >
+               <X size={20} />
+            </button>
+
             <h2 className={`text-xl font-semibold mb-5 flex items-center gap-2 ${editingGoal ? 'text-purple-400' : 'text-emerald-500'}`}>
               {editingGoal ? <Pencil size={20}/> : <Plus size={20} />} 
               {editingGoal ? 'Editar Meta' : 'Nova Meta'}
@@ -729,11 +917,11 @@ export default function MetasPage() {
                 <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                   {editingGoal && (
-                      <button type="button" onClick={handleCancelEdit} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3.5 rounded-xl mt-2 transition-all">Cancelar</button>
+                      <button type="button" onClick={handleCancelEdit} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3.5 rounded-xl transition-all">Cancelar</button>
                   )}
-                  <button type="submit" disabled={isSaving} className={`flex-1 bg-gradient-to-r ${editingGoal ? 'from-purple-600 to-indigo-600' : 'from-emerald-600 to-teal-600'} hover:opacity-90 text-white font-bold py-3.5 rounded-xl mt-2 transition-all shadow-lg flex justify-center gap-2`}>
+                  <button type="submit" disabled={isSaving} className={`flex-1 bg-gradient-to-r ${editingGoal ? 'from-purple-600 to-indigo-600' : 'from-emerald-600 to-teal-600'} hover:opacity-90 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex justify-center gap-2`}>
                     {isSaving ? "Salvando..." : editingGoal ? "Atualizar Meta" : "Traçar Meta"}
                   </button>
               </div>
@@ -805,12 +993,15 @@ export default function MetasPage() {
                   {!isCompleted && (
                     <div className="flex gap-2 mt-4 pt-4 border-t border-gray-800">
                         <p className="text-[10px] text-gray-500 self-center mr-auto uppercase font-bold hidden sm:block">Aportar:</p>
+                        
+                        {/* BOTÕES RÁPIDOS AGORA ABREM MODAL PARA NOMEAR */}
                         {[50, 100, 500].map(val => (
-                            <button key={val} onClick={(e) => { e.stopPropagation(); handleQuickAdd(goal, val); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600 hover:text-white text-emerald-500 text-xs font-bold border border-gray-700 transition-all flex items-center gap-1 shadow-sm active:scale-95">
+                            <button key={val} onClick={(e) => { e.stopPropagation(); openDepositModal(goal, val); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-emerald-600 hover:text-white text-emerald-500 text-xs font-bold border border-gray-700 transition-all flex items-center gap-1 shadow-sm active:scale-95">
                                 <TrendingUp size={12}/> +{val}
                             </button>
                         ))}
-                        <button onClick={(e) => { e.stopPropagation(); setGoalToAddAmount(goal); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold border border-gray-700 transition-all active:scale-95">Outro</button>
+                        
+                        <button onClick={(e) => { e.stopPropagation(); openDepositModal(goal, 0); }} className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold border border-gray-700 transition-all active:scale-95">Outro</button>
                     </div>
                   )}
                   {isCompleted && <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold justify-center bg-emerald-500/10 rounded-lg py-2 mt-4 border border-emerald-500/20"><CheckCircle2 size={16} /> Meta Conquistada!</div>}
