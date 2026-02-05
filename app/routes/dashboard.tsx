@@ -11,7 +11,8 @@ import {
   ChevronDown 
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client"; // ✅ Supabase Client
-import type { Transaction, IncomeTransaction, ExpenseTransaction, Vehicle } from "~/types/models";
+// ✅ ADICIONADO: FuelTransaction nos imports
+import type { Transaction, IncomeTransaction, ExpenseTransaction, Vehicle, FuelTransaction } from "~/types/models";
 import { ExpenseCategory } from "~/types/enums";
 import { OdometerChart } from "~/components/OdometerChart"; 
 
@@ -253,19 +254,23 @@ export default function Dashboard() {
         return;
       }
 
+      // --- CORREÇÃO AQUI: Divisão por 100 nos valores (amount e split) ---
       const mappedTransactions: Transaction[] = (data || []).map((t: any) => ({
         id: t.id,
         userId: t.user_id,
         vehicleId: t.vehicle_id,
         type: t.type,
-        amount: Number(t.amount),
+        amount: Number(t.amount) / 100, // <--- Correção para centavos
         date: t.date,
         description: t.description,
         platform: t.platform,
         distanceDriven: t.distance_driven,
         onlineDurationMinutes: t.online_duration_minutes,
         tripsCount: t.trips_count,
-        split: t.split,
+        // Se houver split (divisão de ganhos), corrigir os valores internos também
+        split: t.split && Array.isArray(t.split) 
+           ? t.split.map((s: any) => ({ ...s, amount: Number(s.amount) / 100 })) 
+           : t.split,
         clusterKmPerLiter: t.cluster_km_per_liter,
         category: t.category,
         fuelType: t.fuel_type,
@@ -298,7 +303,7 @@ export default function Dashboard() {
     const dailyMap = new Map();
 
     data.forEach(t => {
-      const val = t.amount; // Supabase retorna número correto
+      const val = t.amount; 
       const tDate = new Date(t.date);
       const dateKey = tDate.getUTCDate(); 
 
@@ -337,7 +342,10 @@ export default function Dashboard() {
         const isFuel = exp.category === ExpenseCategory.FUEL || categoryStr === 'Combustível' || categoryStr === 'FUEL';
         
         if (isFuel) {
-           if (exp.liters) totalLitersRefueled += Number(exp.liters);
+           // === CORREÇÃO DE TIPO (TypeScript) ===
+           // Forçamos o 'exp' a ser tratado como FuelTransaction
+           const fuelExp = exp as FuelTransaction;
+           if (fuelExp.liters) totalLitersRefueled += Number(fuelExp.liters);
         } else {
            maintenanceExpenses += val;
         }
