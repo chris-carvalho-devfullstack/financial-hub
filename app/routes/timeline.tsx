@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import React from "react";
+import { useNavigate } from "react-router";
 import { 
   Calendar, Wrench, Fuel, TrendingUp, Filter, 
   Car, MapPin, ArrowDownCircle, Route, Flag,
   Gauge, Droplets, DollarSign, Timer, Navigation,
   Target, Trophy, CheckCircle2, CalendarDays, Clock,
-  Layers, Briefcase, Map as MapIcon, Globe, Hash
+  Layers, Briefcase, Map as MapIcon, Globe, Hash, Grid3x3, ChevronDown, Check
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
 import { ExpenseCategory, Platform } from "~/types/enums";
@@ -85,6 +86,12 @@ const cloneIcon = (icon: React.ReactElement | undefined, size: number) => {
   return icon;
 };
 
+// Função para gerar slug da marca
+const brandSlugFrom = (brand?: string) => {
+  if (!brand) return '';
+  return brand.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '');
+};
+
 // === SKELETON ===
 function TimelineSkeleton() {
   return (
@@ -108,12 +115,14 @@ function TimelineSkeleton() {
 
 // === PÁGINA PRINCIPAL ===
 export default function TimelinePage() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
   const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'ALL' | 'INCOME' | 'EXPENSE' | 'FUEL' | 'MAINTENANCE'>('ALL');
+  const [openVehicleDropdown, setOpenVehicleDropdown] = useState(false);
 
   // Auth
   useEffect(() => {
@@ -250,6 +259,29 @@ export default function TimelinePage() {
     }, {} as Record<string, TimelineItem[]>);
   }, [timelineItems, filterType]);
 
+  // Ordenação de veículos: ativo no topo, resto alfabético
+  const orderedVehicles = useMemo(() => {
+    if (!vehicles || vehicles.length === 0) return [];
+    const copy = [...vehicles];
+    // Ordena alfabeticamente por modelo ou nome
+    copy.sort((a: any, b: any) => {
+      const A = (a.model || a.name || '').toString().toLowerCase();
+      const B = (b.model || b.name || '').toString().toLowerCase();
+      return A.localeCompare(B, 'pt-BR', { sensitivity: 'base' });
+    });
+
+    // Encontrar veículo selecionado e colocá-lo na primeira posição
+    if (selectedVehicleId) {
+      const idx = copy.findIndex((c: any) => c.id === selectedVehicleId);
+      if (idx > 0) {
+        const [sel] = copy.splice(idx, 1);
+        copy.unshift(sel);
+      }
+    }
+
+    return copy;
+  }, [vehicles, selectedVehicleId]);
+
   // Helper para buscar nome do veículo
   const getVehicleName = (vehicleId: string) => {
     const vehicle = vehicles.find(v => v.id === vehicleId);
@@ -324,19 +356,91 @@ export default function TimelinePage() {
 
   return (
     <div className="min-h-screen pb-[calc(6rem+env(safe-area-inset-bottom))] bg-gray-950">
-      
       <div className="bg-gray-900/80 backdrop-blur-md border-b border-gray-800 sticky top-0 z-30 p-4 shadow-2xl">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 max-w-5xl mx-auto">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Route className="text-emerald-500" /> Linha do Tempo
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+              <Route className="text-emerald-500" /> Linha do Tempo
+            </h1>
+            <button
+              onClick={() => navigate('/modelo-timeline')}
+              className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-emerald-500 transition-colors"
+              title="Ver visualização em painel"
+            >
+              <Grid3x3 size={20} />
+            </button>
+          </div>
           <div className="flex w-full md:w-auto gap-3">
-            <div className="relative flex-1 md:w-64">
-              <Car className="absolute left-3 top-3 text-gray-500" size={16} />
-              <select value={selectedVehicleId} onChange={(e) => { setSelectedVehicleId(e.target.value); supabase.from('profiles').update({ last_selected_vehicle_id: e.target.value }).eq('id', user?.id); }} className="w-full pl-10 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 outline-none appearance-none">
-                {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
+            {/* Vehicle Selector - Modern Dropdown */}
+            <div className="relative flex-1 md:w-auto">
+              {vehicles.length > 0 && (
+                <button 
+                  onClick={() => setOpenVehicleDropdown(o => !o)} 
+                  className="flex items-center gap-2 w-full md:w-auto bg-gray-800 border border-gray-700 hover:border-gray-600 rounded-lg px-3 py-2.5 text-gray-100 text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                >
+                  <div className="h-6 w-6 rounded bg-gray-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                    {vehicles.find(v => v.id === selectedVehicleId)?.brand ? (
+                      <img
+                        src={`/logos/brands/${brandSlugFrom(vehicles.find(v => v.id === selectedVehicleId)?.brand)}.png`}
+                        alt={vehicles.find(v => v.id === selectedVehicleId)?.brand}
+                        className="w-full h-full object-contain"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <Car size={16} />
+                    )}
+                  </div>
+                  <div className="text-left hidden sm:block flex-1 md:flex-none">
+                    <div className="text-xs font-bold text-gray-300 truncate">{vehicles.find(v => v.id === selectedVehicleId)?.model || vehicles.find(v => v.id === selectedVehicleId)?.name}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{vehicles.find(v => v.id === selectedVehicleId)?.license_plate || vehicles.find(v => v.id === selectedVehicleId)?.licensePlate || '—'}</div>
+                  </div>
+                  <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
+                </button>
+              )}
+
+              {openVehicleDropdown && vehicles.length > 0 && (
+                <div className="absolute top-full left-0 right-0 md:left-auto md:right-0 mt-2 w-full md:w-72 bg-gray-900 border border-gray-700 rounded-lg p-2 shadow-2xl z-50">
+                  <div className="flex flex-col gap-1 max-h-60 overflow-y-auto">
+                    {orderedVehicles.map((v: any) => (
+                      <button 
+                        key={v.id} 
+                        onClick={() => { 
+                          setSelectedVehicleId(v.id); 
+                          supabase.from('profiles').update({ last_selected_vehicle_id: v.id }).eq('id', user?.id);
+                          setOpenVehicleDropdown(false); 
+                        }} 
+                        className={`flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors ${v.id === selectedVehicleId ? 'bg-gray-800/60' : ''}`}
+                      >
+                        <div className="h-8 w-8 rounded bg-gray-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                          {v.brand ? (
+                            <img 
+                              src={`/logos/brands/${brandSlugFrom(v.brand)}.png`} 
+                              alt={v.brand} 
+                              className="w-full h-full object-contain" 
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} 
+                            />
+                          ) : (
+                            <Car size={18} />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-gray-100 truncate">{v.model || v.name}</div>
+                          <div className="text-xs text-gray-500 truncate">{v.license_plate || v.licensePlate || '—'}</div>
+                        </div>
+                        {v.id === selectedVehicleId && (
+                          <div className="flex items-center gap-1 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex-shrink-0">
+                            <Check size={12} />
+                            Ativo
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Filter Selector */}
             <div className="relative flex-1 md:w-48">
               <Filter className="absolute left-3 top-3 text-gray-500" size={16} />
               <select value={filterType} onChange={(e) => setFilterType(e.target.value as any)} className="w-full pl-10 bg-gray-800 border border-gray-700 text-white rounded-lg p-2.5 outline-none appearance-none">
@@ -348,9 +452,7 @@ export default function TimelinePage() {
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="max-w-3xl mx-auto p-4 md:p-8">
+      </div>      <div className="max-w-3xl mx-auto p-4 md:p-8">
         
         {loading ? (
           <TimelineSkeleton />

@@ -1,11 +1,12 @@
 // app/routes/modelo-timeline.tsx
 
 import { useEffect, useState, useMemo, useCallback } from "react";
+import { useNavigate } from "react-router";
 import { 
   Wrench, Fuel, TrendingUp, 
   Globe, Zap, Calendar, Share2,
   ChevronDown, Search, AlertCircle, Flag, Rocket,
-  Layers, DollarSign, MapPin, Gauge, Briefcase, Check
+  Layers, DollarSign, MapPin, Gauge, Briefcase, Check, List, Smartphone
 } from "lucide-react";
 import { supabase } from "~/lib/supabase.client";
 import { ExpenseCategory, Platform } from "~/types/enums";
@@ -469,6 +470,7 @@ function StartLine() {
 
 // === MAIN PAGE ===
 export default function TimelineModelPage() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
@@ -478,6 +480,26 @@ export default function TimelineModelPage() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFilterType, setDateFilterType] = useState<'all'|'day'|'week'|'month'>('all');
   const [dateFilterValue, setDateFilterValue] = useState<string>('');
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
+
+  // Monitorar mudanças reais de orientação
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleOrientationChange);
+    return () => {
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.removeEventListener('resize', handleOrientationChange);
+    };
+  }, []);
+
+  // Alternar orientação de tela
+  const toggleOrientation = () => {
+    setIsPortrait(!isPortrait);
+  };
 
   // Auth
   useEffect(() => {
@@ -722,7 +744,7 @@ export default function TimelineModelPage() {
   }, [dateFilteredItems]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-950 dark:bg-slate-950 text-slate-100 flex-col">
+    <div className={`flex h-screen overflow-hidden bg-slate-950 dark:bg-slate-950 text-slate-100 flex-col ${!isPortrait ? 'force-landscape' : ''}`}>
       <Header vehicles={vehicles} selectedVehicleId={selectedVehicleId} onVehicleChange={handleVehicleChange} />
       
       {/* Main Scrollable Content */}
@@ -731,12 +753,36 @@ export default function TimelineModelPage() {
         .modern-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); border-radius: 9999px; }
         .modern-scrollbar::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#16a34a,#059669); border-radius: 9999px; border: 2px solid rgba(15,23,42,0.6); }
         .modern-scrollbar { scrollbar-width: thin; scrollbar-color: #059669 rgba(255,255,255,0.02); }
+        ${!isPortrait ? `
+          .force-landscape { display: flex; flex-direction: column; }
+          .force-landscape .flex.flex-col { display: flex; flex-direction: column; }
+          .force-landscape .md\\:flex { display: flex; }
+          .force-landscape .md\\:hidden { display: none !important; }
+          .force-landscape .md\\:block { display: block !important; }
+          .force-landscape .hidden.sm\\:block { display: block !important; }
+        ` : ''}
       `}</style>
       <main className="flex-1 overflow-y-auto modern-scrollbar bg-slate-950 dark:bg-slate-950 relative pb-20">
         {/* Page Heading */}
         <div className="px-8 py-8 flex flex-wrap justify-between items-end gap-4">
           <div className="flex flex-col gap-2">
-            <p className="text-4xl font-black leading-tight tracking-tight">Timeline Dashboard</p>
+            <div className="flex items-center gap-3">
+              <p className="text-4xl font-black leading-tight tracking-tight">Timeline Dashboard</p>
+              <button
+                onClick={() => navigate('/timeline')}
+                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-emerald-500 transition-colors"
+                title="Ver visualização em lista"
+              >
+                <List size={24} />
+              </button>
+              <button
+                onClick={toggleOrientation}
+                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-emerald-500 transition-colors md:hidden"
+                title="Alternar orientação de tela"
+              >
+                <Smartphone size={24} />
+              </button>
+            </div>
             <p className="text-emerald-500 font-medium flex items-center gap-2">
               <Globe className="w-4 h-4" />
               Live highway view of operational finances
