@@ -1,19 +1,18 @@
 // app/routes/dashboard.tsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, Wallet, MapPin, AlertCircle, ChevronLeft, ChevronRight, 
-  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign, Car,
+  Calendar, Clock, Zap, Gauge, Fuel, Trophy, Target, Wrench, Hash, DollarSign,
   ChevronDown 
 } from "lucide-react";
-import { supabase } from "~/lib/supabase.client"; // ✅ Supabase Client
-// ✅ ADICIONADO: FuelTransaction nos imports
-import type { Transaction, IncomeTransaction, ExpenseTransaction, Vehicle, FuelTransaction } from "~/types/models";
-import { ExpenseCategory } from "~/types/enums";
+import { supabase } from "~/lib/supabase.client";
+import type { Vehicle, Transaction, IncomeTransaction, FuelTransaction } from "~/types/models";
+import { ExpenseCategory, Platform } from "~/types/enums";
 import { OdometerChart } from "~/components/OdometerChart"; 
 
 // Tipos
@@ -26,7 +25,7 @@ const getBrandLogo = (brand: string) => {
   return `/logos/brands/${safeBrand}.png`;
 };
 
-// === HELPER: DATA ===
+// === HELPER: DATA (Filtros Temporais) ===
 const getStartEndDates = (date: Date, filter: TimeFilter) => {
   const start = new Date(date);
   const end = new Date(date);
@@ -36,7 +35,7 @@ const getStartEndDates = (date: Date, filter: TimeFilter) => {
     end.setHours(23, 59, 59, 999);
   } else if (filter === 'WEEK') {
     const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+    const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Ajuste para segunda-feira
     start.setDate(diff);
     start.setHours(0,0,0,0);
     end.setDate(start.getDate() + 6);
@@ -51,7 +50,7 @@ const getStartEndDates = (date: Date, filter: TimeFilter) => {
   return { start, end };
 };
 
-// === TOOLTIP ===
+// === COMPONENTE: TOOLTIP DO GRÁFICO ===
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -79,16 +78,33 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-// === SMART CARD ===
+// === COMPONENTE: SMART CARD ===
 function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = false }: any) {
+  // Mapas de cores para Tailwind (necessário pois interpolação dinâmica completa às vezes falha no build)
+  const colors: any = {
+    emerald: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+    red: "text-red-500 bg-red-500/10 border-red-500/20",
+    blue: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+    indigo: "text-indigo-500 bg-indigo-500/10 border-indigo-500/20",
+    violet: "text-violet-500 bg-violet-500/10 border-violet-500/20",
+    pink: "text-pink-500 bg-pink-500/10 border-pink-500/20",
+    cyan: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20",
+    lime: "text-lime-500 bg-lime-500/10 border-lime-500/20",
+    orange: "text-orange-500 bg-orange-500/10 border-orange-500/20",
+    amber: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+    teal: "text-teal-500 bg-teal-500/10 border-teal-500/20",
+    gray: "text-gray-400 bg-gray-500/10 border-gray-500/20"
+  };
+
+  const styleClass = colors[color] || colors.gray;
+
   return (
     <div className={`
       relative p-5 rounded-2xl border shadow-lg overflow-hidden group hover:border-gray-600 transition-all
-      ${highlight ? `bg-${color}-900/10 border-${color}-500/30` : 'bg-gray-900 border-gray-800'}
+      ${highlight ? 'bg-gray-800/80 border-gray-600' : 'bg-gray-900 border-gray-800'}
     `}>
-      <div className={`absolute -right-6 -top-6 p-8 opacity-[0.03] group-hover:opacity-10 transition-opacity bg-${color}-500 rounded-full blur-2xl`}></div>
       <div className="flex justify-between items-start mb-3">
-         <div className={`p-2.5 rounded-xl bg-${color}-500/10 text-${color}-500 border border-${color}-500/20`}>
+         <div className={`p-2.5 rounded-xl ${styleClass}`}>
             <Icon size={22} />
          </div>
       </div>
@@ -111,9 +127,7 @@ export default function Dashboard() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('MONTH');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  const navigate = useNavigate();
-
-  // Métricas
+  // Métricas Consolidadas
   const [metrics, setMetrics] = useState({
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
@@ -128,6 +142,7 @@ export default function Dashboard() {
 
   const [chartData, setChartData] = useState<any[]>([]);
 
+  // === 1. NAVEGAÇÃO DE DATA ===
   const navigateDate = (direction: 'prev' | 'next') => {
     const newDate = new Date(currentDate);
     const method = direction === 'next' ? 1 : -1;
@@ -137,24 +152,14 @@ export default function Dashboard() {
     setCurrentDate(newDate);
   };
 
-  // 1. Carregar Veículos e Preferência do Usuário (Supabase)
+  // === 2. CARREGAR VEÍCULOS E PREFERÊNCIA ===
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return; 
 
-      // Busca Veículos
-      const { data: vehiclesData, error: vehiclesError } = await supabase
-        .from('vehicles')
-        .select('*')
-        .eq('user_id', session.user.id);
+      const { data: vehiclesData } = await supabase.from('vehicles').select('*').eq('user_id', session.user.id);
 
-      if (vehiclesError) {
-        console.error("Erro ao buscar veículos:", vehiclesError);
-        return;
-      }
-
-      // Mapeia snake_case (banco) para camelCase (frontend)
       const mappedVehicles: Vehicle[] = (vehiclesData || []).map((v: any) => ({
         id: v.id,
         userId: v.user_id,
@@ -171,45 +176,32 @@ export default function Dashboard() {
 
       setVehicles(mappedVehicles);
 
-      // Busca Preferência no Perfil
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('last_selected_vehicle_id')
-        .eq('id', session.user.id)
-        .single();
+      const { data: profileData } = await supabase.from('profiles').select('last_selected_vehicle_id').eq('id', session.user.id).single();
 
-      // Lógica de Seleção: Perfil > Primeiro da Lista > Nada
       if (profileData?.last_selected_vehicle_id && mappedVehicles.find(v => v.id === profileData.last_selected_vehicle_id)) {
         setSelectedVehicleId(profileData.last_selected_vehicle_id);
       } else if (mappedVehicles.length > 0) {
         setSelectedVehicleId(mappedVehicles[0].id);
       }
     };
-
     fetchData();
   }, []);
 
-  // Função para trocar veículo e PERSISTIR NO SERVIDOR
   const handleChangeVehicle = async (id: string) => {
     setSelectedVehicleId(id);
     setIsVehicleMenuOpen(false);
-    
-    // Atualiza no banco de dados para persistir entre dispositivos
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
-      await supabase
-        .from('profiles')
-        .update({ last_selected_vehicle_id: id })
-        .eq('id', session.user.id);
+      await supabase.from('profiles').update({ last_selected_vehicle_id: id }).eq('id', session.user.id);
     }
   };
 
-  // 2. Buscar último preço de combustível (Supabase)
+  // === 3. BUSCAR ÚLTIMO PREÇO DE COMBUSTÍVEL ===
   useEffect(() => {
     if (!selectedVehicleId) return;
-    
     const fetchLastFuel = async () => {
-      const { data, error } = await supabase
+      // Busca a última despesa de combustível com preço válido
+      const { data } = await supabase
         .from('transactions')
         .select('price_per_liter')
         .eq('vehicle_id', selectedVehicleId)
@@ -218,17 +210,13 @@ export default function Dashboard() {
         .order('date', { ascending: false })
         .limit(1);
       
-      if (!error && data && data.length > 0) {
-        setLastFuelPrice(Number(data[0].price_per_liter));
-      } else {
-        setLastFuelPrice(0);
-      }
+      if (data && data.length > 0) setLastFuelPrice(Number(data[0].price_per_liter));
+      else setLastFuelPrice(0);
     };
-    
     fetchLastFuel();
   }, [selectedVehicleId]);
 
-  // 3. Buscar Transações e Calcular Métricas (Supabase)
+  // === 4. BUSCAR TRANSAÇÕES E CALCULAR (Refatorado) ===
   useEffect(() => {
     if (!selectedVehicleId) return;
     
@@ -254,31 +242,46 @@ export default function Dashboard() {
         return;
       }
 
-      // --- CORREÇÃO AQUI: Divisão por 100 nos valores (amount e split) ---
-      const mappedTransactions: Transaction[] = (data || []).map((t: any) => ({
-        id: t.id,
-        userId: t.user_id,
-        vehicleId: t.vehicle_id,
-        type: t.type,
-        amount: Number(t.amount) / 100, // <--- Correção para centavos
-        date: t.date,
-        description: t.description,
-        platform: t.platform,
-        distanceDriven: t.distance_driven,
-        onlineDurationMinutes: t.online_duration_minutes,
-        tripsCount: t.trips_count,
-        // Se houver split (divisão de ganhos), corrigir os valores internos também
-        split: t.split && Array.isArray(t.split) 
+      // === MAPEAMENTO ROBUSTO (Compatível com Ganhos.tsx e Despesas.tsx) ===
+      const mappedTransactions: Transaction[] = (data || []).map((t: any) => {
+        // Conversão de Centavos para Reais
+        const amount = Number(t.amount) / 100;
+
+        // Processamento do Split (Se houver) - Também converte centavos
+        const split = t.split && Array.isArray(t.split) 
            ? t.split.map((s: any) => ({ ...s, amount: Number(s.amount) / 100 })) 
-           : t.split,
-        clusterKmPerLiter: t.cluster_km_per_liter,
-        category: t.category,
-        fuelType: t.fuel_type,
-        liters: t.liters ? Number(t.liters) : undefined,
-        pricePerLiter: t.price_per_liter ? Number(t.price_per_liter) : undefined,
-        isFullTank: t.is_full_tank,
-        createdAt: t.created_at
-      })) as Transaction[];
+           : t.split;
+
+        return {
+          id: t.id,
+          userId: t.user_id,
+          vehicleId: t.vehicle_id,
+          type: t.type, // 'INCOME' ou 'EXPENSE'
+          amount: amount, 
+          date: t.date,
+          
+          // === CAMPOS DE GANHO (Compatibilidade com INSERT do ganhos.tsx) ===
+          // O formulário de ganhos salva em: 'distance', 'duration', 'trip_count'
+          distanceDriven: Number(t.distance ?? t.distance_driven ?? 0), 
+          onlineDurationMinutes: Number(t.duration ?? t.online_duration_minutes ?? 0),
+          tripsCount: Number(t.trip_count ?? t.trips_count ?? 0),
+          description: t.notes || t.description, // Ganhos usa 'notes'
+          clusterKmPerLiter: Number(t.cluster_km_per_liter ?? 0),
+          platform: t.platform,
+          split: split,
+
+          // === CAMPOS DE DESPESA (Compatibilidade com INSERT do despesas.tsx) ===
+          category: t.category,
+          fuelType: t.fuel_type,
+          liters: t.liters ? Number(t.liters) : undefined,
+          pricePerLiter: t.price_per_liter ? Number(t.price_per_liter) : undefined,
+          isFullTank: t.is_full_tank,
+          stationName: t.station_name,
+          
+          odometer: Number(t.odometer ?? 0),
+          createdAt: t.created_at
+        } as Transaction;
+      });
 
       setTransactions(mappedTransactions);
       calculateMetrics(mappedTransactions);
@@ -288,79 +291,90 @@ export default function Dashboard() {
     fetchTransactions();
   }, [currentDate, timeFilter, lastFuelPrice, selectedVehicleId]);
 
+  // === 5. CÁLCULO DE MÉTRICAS (Refatorado) ===
   const calculateMetrics = (data: Transaction[]) => {
     let income = 0;
     let expense = 0;
     let km = 0;
     let minutes = 0;
-    let totalLitersRefueled = 0;
-    let sumClusterAvg = 0;
-    let countClusterEntries = 0;
     let trips = 0; 
-    let maintenanceExpenses = 0; 
     
+    // Variáveis para Média e Custos
+    let totalLitersRefueled = 0; // Para Média Bomba
+    let sumClusterAvg = 0;       // Para Média Painel
+    let countClusterEntries = 0;
+    let maintenanceExpenses = 0;
+    
+    // Variáveis para "Melhor App"
     const platformIncome: Record<string, number> = {};
+    
+    // Variáveis para Gráfico
     const dailyMap = new Map();
 
     data.forEach(t => {
       const val = t.amount; 
       const tDate = new Date(t.date);
-      const dateKey = tDate.getUTCDate(); 
+      const dateKey = tDate.getUTCDate(); // Dia do mês para o gráfico
 
+      // Inicializa o dia no gráfico se não existir
       if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, { day: dateKey, income: 0, expense: 0 });
       const dayData = dailyMap.get(dateKey);
 
       if (t.type === 'INCOME') {
+        const inc = t as IncomeTransaction;
         income += val;
         dayData.income += val;
-        
-        const inc = t as IncomeTransaction;
 
+        // Somatórias de Produtividade
+        km += Number(inc.distanceDriven || 0);
+        minutes += Number(inc.onlineDurationMinutes || 0);
+        trips += Number(inc.tripsCount || 0);
+
+        // Média do Painel (somente se valor for válido)
+        if (inc.clusterKmPerLiter && inc.clusterKmPerLiter > 0) {
+          sumClusterAvg += Number(inc.clusterKmPerLiter);
+          countClusterEntries++;
+        }
+
+        // Lógica de Faturamento por App (Considerando Splits)
         if (inc.platform === 'MULTIPLE' && inc.split && inc.split.length > 0) {
            inc.split.forEach(item => {
-              const itemVal = item.amount; 
-              platformIncome[item.platform] = (platformIncome[item.platform] || 0) + itemVal;
+              // item.amount já foi convertido para Reais no map inicial
+              platformIncome[item.platform] = (platformIncome[item.platform] || 0) + item.amount;
            });
         } else if (inc.platform) {
            platformIncome[inc.platform] = (platformIncome[inc.platform] || 0) + val;
         }
 
-        if (inc.distanceDriven) km += Number(inc.distanceDriven);
-        if (inc.onlineDurationMinutes) minutes += Number(inc.onlineDurationMinutes);
-        if (inc.tripsCount) trips += Number(inc.tripsCount);
-        
-        if (inc.clusterKmPerLiter && inc.clusterKmPerLiter > 0) {
-          sumClusterAvg += Number(inc.clusterKmPerLiter);
-          countClusterEntries++;
-        }
-      } else {
+      } else if (t.type === 'EXPENSE') {
+        const exp = t as FuelTransaction; // Cast forçado para acesso aos campos
         expense += val;
         dayData.expense += val;
         
-        const exp = t as ExpenseTransaction;
-        const categoryStr = exp.category as string; 
-        const isFuel = exp.category === ExpenseCategory.FUEL || categoryStr === 'Combustível' || categoryStr === 'FUEL';
+        // Verifica se é combustível (pode vir como 'FUEL' ou enum)
+        const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'FUEL' || (t as any).fuelType;
         
-        if (isFuel) {
-           // === CORREÇÃO DE TIPO (TypeScript) ===
-           // Forçamos o 'exp' a ser tratado como FuelTransaction
-           const fuelExp = exp as FuelTransaction;
-           if (fuelExp.liters) totalLitersRefueled += Number(fuelExp.liters);
+        if (isFuel && exp.liters) {
+           totalLitersRefueled += Number(exp.liters);
         } else {
+           // Se não é combustível, é manutenção/outros
            maintenanceExpenses += val;
         }
       }
     });
 
+    // --- CÁLCULOS FINAIS ---
     const profit = income - expense; 
     const hours = minutes / 60;
     
     const avgTicket = trips > 0 ? (income / trips) : 0;
     const tripsPerHour = hours > 0 ? (trips / hours) : 0;
 
-    const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0;
+    // Médias
+    const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0; // KM rodados no período / Litros abastecidos no período
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
+    // Custos por KM
     let fuelCostPerKmPanel = 0;
     if (clusterAvg > 0 && lastFuelPrice > 0) {
       fuelCostPerKmPanel = lastFuelPrice / clusterAvg;
@@ -371,18 +385,26 @@ export default function Dashboard() {
       fuelCostPerKmPump = lastFuelPrice / realAvg;
     }
 
-    const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
+    // Custo Operacional (Manutenção + Combustível)
+    // Se tiver média real, usa ela. Senão, usa painel.
     const usedFuelCostPerKm = fuelCostPerKmPump > 0 ? fuelCostPerKmPump : fuelCostPerKmPanel;
-    const totalOperationalCost = (usedFuelCostPerKm * km) + maintenanceExpenses;
+    const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
     
+    const totalCostPerKm = usedFuelCostPerKm + maintenanceCostPerKm;
+    const totalOperationalCost = (totalCostPerKm * km); // Custo estimado total baseado nos KMs rodados
+    
+    // Lucros Reais (Baseado em KM rodado e custo estimado, não apenas caixa)
     const realProfitPerHour = hours > 0 ? ((income - totalOperationalCost) / hours) : 0;
     const realProfitPerKm = km > 0 ? ((income - totalOperationalCost) / km) : 0;
     
+    // Brutos
     const grossPerHour = hours > 0 ? income / hours : 0;
     const grossPerKm = km > 0 ? income / km : 0;
+    
     const activeDays = dailyMap.size || 1;
     const avgDailyIncome = income / activeDays;
 
+    // Melhor App
     let bestApp = { name: '-', amount: 0 };
     Object.entries(platformIncome).forEach(([name, amount]) => {
       if (amount > bestApp.amount) bestApp = { name, amount };
@@ -416,10 +438,11 @@ export default function Dashboard() {
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mt-4">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-2">Visão Geral</h1>
-          <p className="text-gray-400 mt-1 text-sm">Acompanhe suas metas e eficiência.</p>
+          <p className="text-gray-400 mt-1 text-sm">Resumo financeiro e operacional.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+           {/* SELETOR DE VEÍCULO */}
            <div className="relative z-50">
               <button 
                 onClick={() => setIsVehicleMenuOpen(!isVehicleMenuOpen)}
@@ -471,6 +494,7 @@ export default function Dashboard() {
 
            <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
+           {/* FILTROS DE TEMPO */}
            <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800">
               {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
                 <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
@@ -479,6 +503,7 @@ export default function Dashboard() {
               ))}
            </div>
            
+           {/* NAVEGAÇÃO DE DATA */}
            <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
               <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
               <div className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
@@ -489,9 +514,28 @@ export default function Dashboard() {
 
       {/* === LINHA 1: FINANCEIRO GERAL (CAIXA) === */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SmartCard title="Lucro Líquido (Caixa)" value={formatMoney(metrics.profit)} subtitle={metrics.profit >= 0 ? "Fluxo de caixa real" : "Prejuízo no caixa"} icon={Wallet} color={metrics.profit >= 0 ? "emerald" : "red"} highlight={true} />
-        <SmartCard title="Faturamento Total" value={formatMoney(metrics.income)} subtitle="Soma de todos os apps" icon={TrendingUp} color="blue" />
-        <SmartCard title="Despesas Totais" value={formatMoney(metrics.expense)} subtitle="Todas saídas (Comb + Outros)" icon={TrendingDown} color="red" />
+        <SmartCard 
+            title="Lucro Líquido (Caixa)" 
+            value={formatMoney(metrics.profit)} 
+            subtitle={metrics.profit >= 0 ? "Entradas - Saídas" : "Prejuízo no período"} 
+            icon={Wallet} 
+            color={metrics.profit >= 0 ? "emerald" : "red"} 
+            highlight={true} 
+        />
+        <SmartCard 
+            title="Faturamento Total" 
+            value={formatMoney(metrics.income)} 
+            subtitle="Soma bruta de ganhos" 
+            icon={TrendingUp} 
+            color="blue" 
+        />
+        <SmartCard 
+            title="Despesas Totais" 
+            value={formatMoney(metrics.expense)} 
+            subtitle="Combustível + Manutenção" 
+            icon={TrendingDown} 
+            color="red" 
+        />
       </div>
 
       {/* === LINHA 2: PRODUTIVIDADE (BRUTO) === */}
@@ -508,7 +552,11 @@ export default function Dashboard() {
                  <div className="p-2.5 rounded-xl bg-yellow-500/10 text-yellow-500 border border-yellow-500/20"><Trophy size={22} /></div>
               </div>
               <p className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">Melhor App</p>
-              <h3 className="text-xl font-bold text-white mt-0.5 mb-0.5 capitalize truncate">{metrics.bestApp.name.toLowerCase().replace('_', ' ')}</h3>
+              <h3 className="text-xl font-bold text-white mt-0.5 mb-0.5 capitalize truncate">
+                 {metrics.bestApp.amount > 0 ? (
+                    Platform[metrics.bestApp.name as keyof typeof Platform] || metrics.bestApp.name
+                 ) : '-'}
+              </h3>
               <p className="text-[10px] text-gray-500">{formatMoney(metrics.bestApp.amount)}</p>
            </div>
         </div>
@@ -546,7 +594,7 @@ export default function Dashboard() {
           <SmartCard 
             title="Lucro Real/Hora" 
             value={formatMoney(metrics.profitPerHour)} 
-            subtitle="Descontando custos" 
+            subtitle="Desc. Combustível/Manut." 
             icon={Target} 
             color="emerald" 
           />
@@ -557,21 +605,21 @@ export default function Dashboard() {
           <SmartCard 
             title="Custo Gas./KM (Painel)" 
             value={formatMoney(metrics.fuelCostPerKmPanel)} 
-            subtitle={metrics.clusterAvg > 0 ? `Base Painel: ${metrics.clusterAvg.toFixed(1)} km/l` : 'Informe a média no ganho'} 
+            subtitle={metrics.clusterAvg > 0 ? `Média Painel: ${metrics.clusterAvg.toFixed(1)} km/l` : 'Informe a média no ganho'} 
             icon={Gauge} 
             color="orange" 
           />
           <SmartCard 
             title="Custo Gas./KM (Bomba)" 
             value={formatMoney(metrics.fuelCostPerKmPump)} 
-            subtitle={metrics.realAvg > 0 ? `Base Bomba: ${metrics.realAvg.toFixed(1)} km/l` : 'Falta reabastecer'} 
+            subtitle={metrics.realAvg > 0 ? `Média Real: ${metrics.realAvg.toFixed(1)} km/l` : 'Falta reabastecer no período'} 
             icon={Fuel} 
             color="amber" 
           />
            <SmartCard 
             title="Outros Custos/KM" 
             value={formatMoney(metrics.maintenanceCostPerKm)} 
-            subtitle="Manutenção, Lanches..." 
+            subtitle="Manutenção, etc." 
             icon={Wrench} 
             color="red" 
           />
@@ -588,16 +636,16 @@ export default function Dashboard() {
       {/* === GRÁFICO DE BARRAS (DIÁRIO) === */}
       <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 h-96 shadow-lg">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-bold text-white">Desempenho Diário (Fluxo de Caixa)</h3>
-          <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">{transactions.length} regs</span>
+          <h3 className="text-lg font-bold text-white">Fluxo de Caixa (Diário)</h3>
+          <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-full border border-gray-700">{transactions.length} registros</span>
         </div>
         
         {loading ? (
-          <div className="h-full flex items-center justify-center text-gray-600 animate-pulse">Carregando...</div>
+          <div className="h-full flex items-center justify-center text-gray-600 animate-pulse">Carregando dados...</div>
         ) : chartData.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-600 border border-dashed border-gray-800 rounded-xl bg-gray-900/50">
             <AlertCircle className="mb-2 h-8 w-8 opacity-50"/>
-            <p className="text-sm">Sem dados em</p>
+            <p className="text-sm">Nenhum registro encontrado em</p>
             <p className="font-bold text-gray-500 capitalize">{formatTitle()}</p>
           </div>
         ) : (

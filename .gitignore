@@ -1,12 +1,20 @@
+# Arquivos de Sistema
 .DS_Store
+
+# Variáveis de Ambiente (CRÍTICO: Nunca comitar)
 .env
+.env.local
+.env.*
 
 # Dependencies
 /node_modules/
 migration-scripts/node_modules/
 
-# Secrets & Keys (Adicione esta linha abaixo)
+# Secrets & Keys
 migration-scripts/serviceAccountKey.json
+
+# Scripts Locais (Robôs e Testes)
+scripts/
 
 # React Router & Build
 /.react-router/
