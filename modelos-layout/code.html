@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Modern Highway Logbook Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#10bc7d",
+                        "background-light": "#f6f8f7",
+                        "background-dark": "#10221b",
+                        "highway-lane": "#23483a",
+                        "income": "#10bc7d",
+                        "fuel": "#f59e0b",
+                        "maintenance": "#ef4444",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .highway-line {
+            background-image: linear-gradient(to bottom, transparent 50%, #ffffff33 50%);
+            background-size: 1px 40px;
+        }
+        .road-glow {
+            box-shadow: 0 0 15px rgba(16, 188, 125, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-white">
+<div class="flex h-screen overflow-hidden">
+<!-- SideNavBar -->
+<aside class="w-64 flex-shrink-0 border-r border-highway-lane/30 bg-background-light dark:bg-background-dark flex flex-col justify-between p-4">
+<div class="flex flex-col gap-8">
+<div class="flex items-center gap-3 px-2">
+<div class="bg-primary rounded-lg p-2 text-white">
+<span class="material-symbols-outlined">local_shipping</span>
+</div>
+<div class="flex flex-col">
+<h1 class="text-base font-bold leading-tight">FleetControl</h1>
+<p class="text-primary text-xs font-medium">Highway Logistics</p>
+</div>
+</div>
+<nav class="flex flex-col gap-2">
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
+<span class="material-symbols-outlined">dashboard</span>
+<p class="text-sm font-semibold">Dashboard</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-highway-lane/20 transition-colors">
+<span class="material-symbols-outlined">directions_car</span>
+<p class="text-sm font-medium">Vehicles</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-highway-lane/20 transition-colors">
+<span class="material-symbols-outlined">payments</span>
+<p class="text-sm font-medium">Fleet Finances</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-highway-lane/20 transition-colors">
+<span class="material-symbols-outlined">assignment</span>
+<p class="text-sm font-medium">Driver Logs</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-highway-lane/20 transition-colors">
+<span class="material-symbols-outlined">settings</span>
+<p class="text-sm font-medium">Settings</p>
+</div>
+</nav>
+</div>
+<div class="mt-auto pt-4 border-t border-highway-lane/20">
+<div class="flex items-center gap-3 p-2 bg-highway-lane/10 rounded-xl">
+<div class="h-10 w-10 rounded-full bg-cover bg-center border-2 border-primary" data-alt="Portrait of a male fleet manager" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDb8d07zJyBWTZwZ9gox8131aMLHl7hc-lJK1Px9iyOqRk_5ljVjEKkr8KJFmaC4TNk-BU3bpHl_IR3L5oSGLoHBnz95Y0D68FZY51R5m8uMUiHZHgnrFq6UIQP3XFvu038FmWpXnJYt5hYwoe7SkOotZgh7pTj178EYEw1OszLGC8bomw-CGITCtB_WhIhGdl2-gHW4890rWCz1Cgk-9DZN_paef_EdctV3s1eUkNr8-Vesv31uZ-w8uFh6Vo1txOwB4eD942PCRs')"></div>
+<div class="flex flex-col overflow-hidden">
+<p class="text-xs font-bold truncate">Alex Rivera</p>
+<p class="text-[10px] text-slate-500">Fleet Admin</p>
+</div>
+</div>
+</div>
+</aside>
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+<!-- TopNavBar -->
+<header class="flex items-center justify-between border-b border-highway-lane/30 px-8 py-4 bg-background-light dark:bg-background-dark z-10">
+<div class="flex items-center gap-6 flex-1">
+<h2 class="text-lg font-bold tracking-tight">Highway Logbook</h2>
+<div class="relative max-w-md w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+<input class="w-full bg-highway-lane/10 border-none rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-primary transition-all" placeholder="Search transactions, drivers, or IDs..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-xl bg-highway-lane/10 hover:bg-highway-lane/20 transition-colors relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full ring-2 ring-background-dark"></span>
+</button>
+<button class="p-2 rounded-xl bg-highway-lane/10 hover:bg-highway-lane/20 transition-colors">
+<span class="material-symbols-outlined">help</span>
+</button>
+<div class="h-8 w-[1px] bg-highway-lane/30 mx-2"></div>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 border border-primary/30" data-alt="Main company logo avatar" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDBK28vYyVR-d8FXSc1vChCZQPntdk0r_BEIJevgqAg93k4BmrivX7N0LQJV-kOSTtsgtT5lrFKQvQKyvPeB5KnNpfTp9JXSwBBpNBFMAnyGZjdKHNfL5LryfU-VEEqOReV6qLxSrZcZSQMStqENKU2jhBd-llzxEP9k6w-ns66Bk4vJUalakMbeXCtQ6JAxJ5aG2NevyExomZCSb7BOu54EmvofG1MSOsRkpGOrAMZsipGW60-1I-Ippk5-9mwHQT4zHf2-DUqYjw");'></div>
+</div>
+</header>
+<!-- Main Scrollable Content -->
+<main class="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark relative pb-20">
+<!-- PageHeading -->
+<div class="px-8 py-8 flex flex-wrap justify-between items-end gap-4">
+<div class="flex flex-col gap-2">
+<p class="text-4xl font-black leading-tight tracking-tight">Timeline Dashboard</p>
+<p class="text-primary font-medium flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">analytics</span>
+                            Live highway view of operational finances
+                        </p>
+</div>
+<div class="flex gap-3">
+<button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-highway-lane/20 font-bold text-sm border border-highway-lane/30 hover:bg-highway-lane/40 transition-all">
+<span class="material-symbols-outlined text-lg">calendar_month</span>
+<span>Filter Date</span>
+</button>
+<button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-white font-bold text-sm hover:opacity-90 transition-all shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined text-lg">ios_share</span>
+<span>Export Report</span>
+</button>
+</div>
+</div>
+<!-- Chips -->
+<div class="px-8 flex gap-3 overflow-x-auto no-scrollbar pb-6">
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary text-white text-xs font-bold border border-primary/20">
+<span>All Activities</span>
+<span class="material-symbols-outlined text-xs">keyboard_arrow_down</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-highway-lane/20 text-slate-400 text-xs font-bold border border-highway-lane/30 hover:bg-highway-lane/40">
+<span class="w-2 h-2 rounded-full bg-income"></span>
+<span>Income</span>
+<span class="material-symbols-outlined text-xs">keyboard_arrow_down</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-highway-lane/20 text-slate-400 text-xs font-bold border border-highway-lane/30 hover:bg-highway-lane/40">
+<span class="w-2 h-2 rounded-full bg-fuel"></span>
+<span>Fuel</span>
+<span class="material-symbols-outlined text-xs">keyboard_arrow_down</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-highway-lane/20 text-slate-400 text-xs font-bold border border-highway-lane/30 hover:bg-highway-lane/40">
+<span class="w-2 h-2 rounded-full bg-maintenance"></span>
+<span>Maintenance</span>
+<span class="material-symbols-outlined text-xs">keyboard_arrow_down</span>
+</button>
+</div>
+<!-- Timeline Highway -->
+<div class="relative w-full flex flex-col items-center">
+<!-- The Highway (Central Axis) -->
+<div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-24 bg-zinc-900/50 dark:bg-zinc-900 border-x-4 border-zinc-800 flex justify-center">
+<div class="highway-line w-[1px] h-full"></div>
+<!-- Road Markings Side -->
+<div class="absolute inset-y-0 left-2 w-[2px] border-l border-zinc-700"></div>
+<div class="absolute inset-y-0 right-2 w-[2px] border-r border-zinc-700"></div>
+</div>
+<!-- Monthly Header Signage -->
+<div class="relative z-10 py-12">
+<div class="bg-primary/20 backdrop-blur-md border-4 border-primary p-4 px-12 rounded-lg text-center shadow-xl shadow-primary/10">
+<h2 class="text-3xl font-black text-primary tracking-widest uppercase">JANUARY 2024</h2>
+</div>
+</div>
+<!-- Timeline Items -->
+<div class="relative w-full max-w-6xl px-4 flex flex-col gap-24">
+<!-- Right Side Transaction (Income) -->
+<div class="flex items-center w-full">
+<div class="w-1/2 flex justify-end">
+<!-- Connecting Ramp Left (Spacer for right items) -->
+</div>
+<!-- Dot on road -->
+<div class="relative z-10 flex flex-shrink-0 items-center justify-center w-12">
+<div class="w-4 h-4 bg-income rounded-full road-glow ring-4 ring-background-dark"></div>
+</div>
+<!-- Card Content Right -->
+<div class="w-1/2 flex items-center">
+<!-- Exit Ramp Line -->
+<div class="h-1 w-12 bg-gradient-to-r from-income to-income/20"></div>
+<div class="bg-background-dark border-l-4 border-income p-5 rounded-r-xl rounded-bl-none shadow-2xl flex-1 max-w-sm">
+<div class="flex justify-between items-start mb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-income">add_circle</span>
+<span class="text-xs font-bold text-income uppercase">Invoice Paid</span>
+</div>
+<span class="text-xs text-slate-500">Jan 12, 14:30</span>
+</div>
+<h3 class="text-xl font-bold mb-1">Global Freight #822</h3>
+<p class="text-sm text-slate-400 mb-4">Route: Houston - Chicago</p>
+<div class="flex justify-between items-center">
+<span class="text-2xl font-black text-white">$4,250.00</span>
+<button class="text-xs font-bold text-primary underline underline-offset-4">View Invoice</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Left Side Transaction (Fuel) -->
+<div class="flex items-center w-full">
+<div class="w-1/2 flex items-center justify-end">
+<div class="bg-background-dark border-r-4 border-fuel p-5 rounded-l-xl rounded-br-none shadow-2xl flex-1 max-w-sm text-right">
+<div class="flex justify-between items-start mb-3 flex-row-reverse">
+<div class="flex items-center gap-2 flex-row-reverse">
+<span class="material-symbols-outlined text-fuel">local_gas_station</span>
+<span class="text-xs font-bold text-fuel uppercase">Fuel Refill</span>
+</div>
+<span class="text-xs text-slate-500">Jan 09, 08:15</span>
+</div>
+<h3 class="text-xl font-bold mb-1">Shell - Route 66</h3>
+<p class="text-sm text-slate-400 mb-4">Vehicle: Semi-Titan #44</p>
+<div class="flex justify-between items-center flex-row-reverse">
+<span class="text-2xl font-black text-white">$842.15</span>
+<button class="text-xs font-bold text-fuel underline underline-offset-4">Receipt Image</button>
+</div>
+</div>
+<!-- Exit Ramp Line -->
+<div class="h-1 w-12 bg-gradient-to-l from-fuel to-fuel/20"></div>
+</div>
+<!-- Dot on road -->
+<div class="relative z-10 flex flex-shrink-0 items-center justify-center w-12">
+<div class="w-4 h-4 bg-fuel rounded-full road-glow ring-4 ring-background-dark"></div>
+</div>
+<div class="w-1/2"></div>
+</div>
+<!-- Right Side Transaction (Maintenance) -->
+<div class="flex items-center w-full">
+<div class="w-1/2"></div>
+<!-- Dot on road -->
+<div class="relative z-10 flex flex-shrink-0 items-center justify-center w-12">
+<div class="w-4 h-4 bg-maintenance rounded-full road-glow ring-4 ring-background-dark"></div>
+</div>
+<!-- Card Content Right -->
+<div class="w-1/2 flex items-center">
+<!-- Exit Ramp Line -->
+<div class="h-1 w-12 bg-gradient-to-r from-maintenance to-maintenance/20"></div>
+<div class="bg-background-dark border-l-4 border-maintenance p-5 rounded-r-xl rounded-bl-none shadow-2xl flex-1 max-w-sm">
+<div class="flex justify-between items-start mb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-maintenance">build</span>
+<span class="text-xs font-bold text-maintenance uppercase">Maintenance</span>
+</div>
+<span class="text-xs text-slate-500">Jan 05, 11:00</span>
+</div>
+<h3 class="text-xl font-bold mb-1">Brake System Flush</h3>
+<p class="text-sm text-slate-400 mb-4">Garage: Elite Trucking Solutions</p>
+<div class="flex justify-between items-center">
+<span class="text-2xl font-black text-white">$1,120.00</span>
+<button class="text-xs font-bold text-maintenance underline underline-offset-4">Log Details</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Monthly Header Signage (February) -->
+<div class="relative z-10 py-12 flex flex-col items-center">
+<div class="bg-zinc-800/80 backdrop-blur-md border-4 border-zinc-700 p-4 px-12 rounded-lg text-center shadow-xl">
+<h2 class="text-3xl font-black text-slate-400 tracking-widest uppercase">DECEMBER 2023</h2>
+</div>
+<div class="mt-4 flex gap-4">
+<div class="h-2 w-16 bg-zinc-800 rounded-full"></div>
+<div class="h-2 w-24 bg-primary/40 rounded-full"></div>
+<div class="h-2 w-16 bg-zinc-800 rounded-full"></div>
+</div>
+</div>
+<!-- Left Side Transaction (Income) -->
+<div class="flex items-center w-full">
+<div class="w-1/2 flex items-center justify-end">
+<div class="bg-background-dark border-r-4 border-income p-5 rounded-l-xl rounded-br-none shadow-2xl flex-1 max-w-sm text-right">
+<div class="flex justify-between items-start mb-3 flex-row-reverse">
+<div class="flex items-center gap-2 flex-row-reverse">
+<span class="material-symbols-outlined text-income">paid</span>
+<span class="text-xs font-bold text-income uppercase">Cargo Bonus</span>
+</div>
+<span class="text-xs text-slate-500">Dec 28, 17:45</span>
+</div>
+<h3 class="text-xl font-bold mb-1">On-Time Completion</h3>
+<p class="text-sm text-slate-400 mb-4">Cargo: Medical Equipment</p>
+<div class="flex justify-between items-center flex-row-reverse">
+<span class="text-2xl font-black text-white">$500.00</span>
+<button class="text-xs font-bold text-income underline underline-offset-4">Confirm</button>
+</div>
+</div>
+<div class="h-1 w-12 bg-gradient-to-l from-income to-income/20"></div>
+</div>
+<div class="relative z-10 flex flex-shrink-0 items-center justify-center w-12">
+<div class="w-4 h-4 bg-income rounded-full road-glow ring-4 ring-background-dark"></div>
+</div>
+<div class="w-1/2"></div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+</body></html>

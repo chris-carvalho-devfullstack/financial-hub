@@ -17,6 +17,7 @@ export default [
     route("despesas", "routes/despesas.tsx"),
     route("veiculos", "routes/veiculos.tsx"),
     route("timeline", "routes/timeline.tsx"),
+    route("modelo-timeline", "routes/modelo-timeline.tsx"),
     route("metas", "routes/metas.tsx"),
     
     // === ROTAS DE PERFIL ===
