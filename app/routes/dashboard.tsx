@@ -1,7 +1,6 @@
 // app/routes/dashboard.tsx
 
-import { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useState } from "react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
@@ -50,6 +49,59 @@ const getStartEndDates = (date: Date, filter: TimeFilter) => {
   return { start, end };
 };
 
+// === LÓGICA DE MÉDIA REAL (TANQUE A TANQUE - CORRIGIDA) ===
+const calculateTankToTankEfficiency = (transactions: any[]) => {
+  // 1. Filtra tudo que parece combustível (tem litros) e ordena por DATA
+  const fuels = transactions
+    .filter(t => Number(t.liters) > 0) 
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Cronológico Crescente
+
+  if (fuels.length < 2) return 0;
+
+  let totalDist = 0;
+  let totalLiters = 0;
+  
+  // Encontra os índices de todos os abastecimentos com TANQUE CHEIO
+  // Aceita snake_case (Supabase raw) ou camelCase
+  const fullTankIndices = fuels
+    .map((t, index) => (t.is_full_tank || t.fullTank || t.isFullTank) ? index : -1)
+    .filter(index => index !== -1);
+
+  if (fullTankIndices.length < 2) return 0;
+
+  // Percorre os intervalos entre Tanques Cheios
+  for (let i = 0; i < fullTankIndices.length - 1; i++) {
+    const startIdx = fullTankIndices[i];
+    const endIdx = fullTankIndices[i+1];
+    
+    const startTx = fuels[startIdx];
+    const endTx = fuels[endIdx];
+
+    // Validação crítica: Precisamos dos Odômetros nos pontos de Tanque Cheio
+    const startOdo = Number(startTx.odometer);
+    const endOdo = Number(endTx.odometer);
+
+    if (startOdo > 0 && endOdo > startOdo) {
+      const dist = endOdo - startOdo;
+      
+      // Soma os litros consumidos NESTE intervalo
+      // Regra: Litros = (Abastecimentos parciais entre Start e End) + (Abastecimento que encheu o tanque no End)
+      // O abastecimento Start NÃO entra na conta de litros (ele serviu para o ciclo anterior)
+      let litersInCycle = 0;
+      for (let j = startIdx + 1; j <= endIdx; j++) {
+         litersInCycle += Number(fuels[j].liters);
+      }
+
+      if (dist > 0 && litersInCycle > 0) {
+        totalDist += dist;
+        totalLiters += litersInCycle;
+      }
+    }
+  }
+
+  return totalLiters > 0 ? (totalDist / totalLiters) : 0;
+};
+
 // === COMPONENTE: TOOLTIP DO GRÁFICO ===
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -79,8 +131,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 // === COMPONENTE: SMART CARD ===
-function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = false }: any) {
-  // Mapas de cores para Tailwind (necessário pois interpolação dinâmica completa às vezes falha no build)
+function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = false, alert = false }: any) {
   const colors: any = {
     emerald: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
     red: "text-red-500 bg-red-500/10 border-red-500/20",
@@ -102,6 +153,7 @@ function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = fals
     <div className={`
       relative p-5 rounded-2xl border shadow-lg overflow-hidden group hover:border-gray-600 transition-all
       ${highlight ? 'bg-gray-800/80 border-gray-600' : 'bg-gray-900 border-gray-800'}
+      ${alert ? 'border-amber-500/50' : ''}
     `}>
       <div className="flex justify-between items-start mb-3">
          <div className={`p-2.5 rounded-xl ${styleClass}`}>
@@ -110,7 +162,7 @@ function SmartCard({ title, value, subtitle, icon: Icon, color, highlight = fals
       </div>
       <p className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">{title}</p>
       <h3 className="text-xl md:text-2xl font-bold text-white mt-0.5 mb-0.5 truncate">{value}</h3>
-      <p className="text-[10px] text-gray-500 truncate">{subtitle}</p>
+      <p className={`text-[10px] truncate ${alert ? 'text-amber-500 font-bold' : 'text-gray-500'}`}>{subtitle}</p>
     </div>
   );
 }
@@ -124,6 +176,9 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [lastFuelPrice, setLastFuelPrice] = useState<number>(0); 
   
+  // Novo State para Média Real Global
+  const [vehicleRealAvg, setVehicleRealAvg] = useState<number>(0);
+
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('MONTH');
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -136,7 +191,9 @@ export default function Dashboard() {
     profitPerHour: 0, profitPerKm: 0, 
     fuelCostPerKmPanel: 0, fuelCostPerKmPump: 0, maintenanceCostPerKm: 0,
     grossPerHour: 0, grossPerKm: 0, avgDailyIncome: 0,
-    clusterAvg: 0, realAvg: 0,
+    clusterAvg: 0, 
+    realAvg: 0,
+    isRealAvgReliable: false, // Flag para saber se a média real foi calculada com sucesso
     bestApp: { name: '-', amount: 0 }
   });
 
@@ -196,27 +253,42 @@ export default function Dashboard() {
     }
   };
 
-  // === 3. BUSCAR ÚLTIMO PREÇO DE COMBUSTÍVEL ===
+  // === 3. FETCH DADOS GLOBAIS DE COMBUSTÍVEL (CORRIGIDO) ===
   useEffect(() => {
     if (!selectedVehicleId) return;
-    const fetchLastFuel = async () => {
-      // Busca a última despesa de combustível com preço válido
-      const { data } = await supabase
-        .from('transactions')
-        .select('price_per_liter')
-        .eq('vehicle_id', selectedVehicleId)
-        .eq('type', 'EXPENSE')
-        .gt('price_per_liter', 0) 
-        .order('date', { ascending: false })
-        .limit(1);
-      
-      if (data && data.length > 0) setLastFuelPrice(Number(data[0].price_per_liter));
-      else setLastFuelPrice(0);
+
+    const fetchFuelStats = async () => {
+       // Busca TODAS as despesas que possam ser combustível (categorias ou tipos)
+       // Ordena por DATA DESCENDENTE (para pegar o preço mais recente primeiro)
+       const { data } = await supabase
+         .from('transactions')
+         .select('*')
+         .eq('vehicle_id', selectedVehicleId)
+         .eq('type', 'EXPENSE')
+         .or('category.eq.FUEL, category.eq.Combustível, fuel_type.not.is.null') 
+         .order('date', { ascending: false }) 
+         .limit(50); // Aumentei o limite para garantir pegar ciclos antigos se necessário
+
+       if (data && data.length > 0) {
+          // 1. Preço Recente (Pega o primeiro que tiver preço > 0)
+          const lastWithPrice = data.find((t:any) => Number(t.price_per_liter) > 0);
+          if (lastWithPrice) setLastFuelPrice(Number(lastWithPrice.price_per_liter));
+
+          // 2. Média Real (Tanque a Tanque)
+          // Precisamos dos dados ordenados por DATA, mas a função espera um array
+          // Passamos tudo para a função calcular
+          const efficiency = calculateTankToTankEfficiency(data);
+          setVehicleRealAvg(efficiency);
+       } else {
+          setLastFuelPrice(0);
+          setVehicleRealAvg(0);
+       }
     };
-    fetchLastFuel();
+
+    fetchFuelStats();
   }, [selectedVehicleId]);
 
-  // === 4. BUSCAR TRANSAÇÕES E CALCULAR (Refatorado) ===
+  // === 4. BUSCAR TRANSAÇÕES DO PERÍODO E CALCULAR ===
   useEffect(() => {
     if (!selectedVehicleId) return;
     
@@ -242,12 +314,8 @@ export default function Dashboard() {
         return;
       }
 
-      // === MAPEAMENTO ROBUSTO (Compatível com Ganhos.tsx e Despesas.tsx) ===
       const mappedTransactions: Transaction[] = (data || []).map((t: any) => {
-        // Conversão de Centavos para Reais
         const amount = Number(t.amount) / 100;
-
-        // Processamento do Split (Se houver) - Também converte centavos
         const split = t.split && Array.isArray(t.split) 
            ? t.split.map((s: any) => ({ ...s, amount: Number(s.amount) / 100 })) 
            : t.split;
@@ -256,28 +324,22 @@ export default function Dashboard() {
           id: t.id,
           userId: t.user_id,
           vehicleId: t.vehicle_id,
-          type: t.type, // 'INCOME' ou 'EXPENSE'
+          type: t.type,
           amount: amount, 
           date: t.date,
-          
-          // === CAMPOS DE GANHO (Compatibilidade com INSERT do ganhos.tsx) ===
-          // O formulário de ganhos salva em: 'distance', 'duration', 'trip_count'
           distanceDriven: Number(t.distance ?? t.distance_driven ?? 0), 
           onlineDurationMinutes: Number(t.duration ?? t.online_duration_minutes ?? 0),
           tripsCount: Number(t.trip_count ?? t.trips_count ?? 0),
-          description: t.notes || t.description, // Ganhos usa 'notes'
+          description: t.notes || t.description,
           clusterKmPerLiter: Number(t.cluster_km_per_liter ?? 0),
           platform: t.platform,
           split: split,
-
-          // === CAMPOS DE DESPESA (Compatibilidade com INSERT do despesas.tsx) ===
           category: t.category,
           fuelType: t.fuel_type,
           liters: t.liters ? Number(t.liters) : undefined,
           pricePerLiter: t.price_per_liter ? Number(t.price_per_liter) : undefined,
           isFullTank: t.is_full_tank,
           stationName: t.station_name,
-          
           odometer: Number(t.odometer ?? 0),
           createdAt: t.created_at
         } as Transaction;
@@ -289,34 +351,27 @@ export default function Dashboard() {
     };
 
     fetchTransactions();
-  }, [currentDate, timeFilter, lastFuelPrice, selectedVehicleId]);
+  }, [currentDate, timeFilter, lastFuelPrice, vehicleRealAvg, selectedVehicleId]); 
 
-  // === 5. CÁLCULO DE MÉTRICAS (Refatorado) ===
+  // === 5. CÁLCULO DE MÉTRICAS ===
   const calculateMetrics = (data: Transaction[]) => {
     let income = 0;
     let expense = 0;
     let km = 0;
     let minutes = 0;
     let trips = 0; 
-    
-    // Variáveis para Média e Custos
-    let totalLitersRefueled = 0; // Para Média Bomba
-    let sumClusterAvg = 0;       // Para Média Painel
+    let sumClusterAvg = 0;
     let countClusterEntries = 0;
     let maintenanceExpenses = 0;
     
-    // Variáveis para "Melhor App"
     const platformIncome: Record<string, number> = {};
-    
-    // Variáveis para Gráfico
     const dailyMap = new Map();
 
     data.forEach(t => {
       const val = t.amount; 
       const tDate = new Date(t.date);
-      const dateKey = tDate.getUTCDate(); // Dia do mês para o gráfico
+      const dateKey = tDate.getUTCDate();
 
-      // Inicializa o dia no gráfico se não existir
       if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, { day: dateKey, income: 0, expense: 0 });
       const dayData = dailyMap.get(dateKey);
 
@@ -324,22 +379,17 @@ export default function Dashboard() {
         const inc = t as IncomeTransaction;
         income += val;
         dayData.income += val;
-
-        // Somatórias de Produtividade
         km += Number(inc.distanceDriven || 0);
         minutes += Number(inc.onlineDurationMinutes || 0);
         trips += Number(inc.tripsCount || 0);
 
-        // Média do Painel (somente se valor for válido)
         if (inc.clusterKmPerLiter && inc.clusterKmPerLiter > 0) {
           sumClusterAvg += Number(inc.clusterKmPerLiter);
           countClusterEntries++;
         }
 
-        // Lógica de Faturamento por App (Considerando Splits)
         if (inc.platform === 'MULTIPLE' && inc.split && inc.split.length > 0) {
            inc.split.forEach(item => {
-              // item.amount já foi convertido para Reais no map inicial
               platformIncome[item.platform] = (platformIncome[item.platform] || 0) + item.amount;
            });
         } else if (inc.platform) {
@@ -347,64 +397,56 @@ export default function Dashboard() {
         }
 
       } else if (t.type === 'EXPENSE') {
-        const exp = t as FuelTransaction; // Cast forçado para acesso aos campos
+        const exp = t as FuelTransaction;
         expense += val;
         dayData.expense += val;
         
-        // Verifica se é combustível (pode vir como 'FUEL' ou enum)
-        const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'FUEL' || (t as any).fuelType;
-        
-        if (isFuel && exp.liters) {
-           totalLitersRefueled += Number(exp.liters);
-        } else {
-           // Se não é combustível, é manutenção/outros
+        // Verifica se é combustível de forma ampla
+        const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'FUEL' || exp.category === 'Combustível' || (t as any).fuelType;
+        if (!isFuel) {
            maintenanceExpenses += val;
         }
       }
     });
 
-    // --- CÁLCULOS FINAIS ---
     const profit = income - expense; 
     const hours = minutes / 60;
-    
     const avgTicket = trips > 0 ? (income / trips) : 0;
     const tripsPerHour = hours > 0 ? (trips / hours) : 0;
-
-    // Médias
-    const realAvg = totalLitersRefueled > 0 ? (km / totalLitersRefueled) : 0; // KM rodados no período / Litros abastecidos no período
+    
+    // Média do Painel (apenas informativa)
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
 
-    // Custos por KM
+    // === CÁLCULO DE CUSTOS REAIS ===
+    const isRealAvgReliable = vehicleRealAvg > 0;
+    let fuelCostPerKmPump = 0;
+
+    // Se temos média real, usamos ela. Se não, usamos Painel como fallback
+    const calcAvg = isRealAvgReliable ? vehicleRealAvg : clusterAvg;
+
+    if (calcAvg > 0 && lastFuelPrice > 0) {
+      fuelCostPerKmPump = lastFuelPrice / calcAvg;
+    }
+
     let fuelCostPerKmPanel = 0;
     if (clusterAvg > 0 && lastFuelPrice > 0) {
       fuelCostPerKmPanel = lastFuelPrice / clusterAvg;
     }
 
-    let fuelCostPerKmPump = 0;
-    if (realAvg > 0 && lastFuelPrice > 0) {
-      fuelCostPerKmPump = lastFuelPrice / realAvg;
-    }
-
-    // Custo Operacional (Manutenção + Combustível)
-    // Se tiver média real, usa ela. Senão, usa painel.
-    const usedFuelCostPerKm = fuelCostPerKmPump > 0 ? fuelCostPerKmPump : fuelCostPerKmPanel;
     const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
     
-    const totalCostPerKm = usedFuelCostPerKm + maintenanceCostPerKm;
-    const totalOperationalCost = (totalCostPerKm * km); // Custo estimado total baseado nos KMs rodados
+    // Custo Total Estimado
+    const totalCostPerKm = fuelCostPerKmPump + maintenanceCostPerKm;
+    const totalOperationalCost = (totalCostPerKm * km); 
     
-    // Lucros Reais (Baseado em KM rodado e custo estimado, não apenas caixa)
     const realProfitPerHour = hours > 0 ? ((income - totalOperationalCost) / hours) : 0;
     const realProfitPerKm = km > 0 ? ((income - totalOperationalCost) / km) : 0;
-    
-    // Brutos
     const grossPerHour = hours > 0 ? income / hours : 0;
     const grossPerKm = km > 0 ? income / km : 0;
     
     const activeDays = dailyMap.size || 1;
     const avgDailyIncome = income / activeDays;
 
-    // Melhor App
     let bestApp = { name: '-', amount: 0 };
     Object.entries(platformIncome).forEach(([name, amount]) => {
       if (amount > bestApp.amount) bestApp = { name, amount };
@@ -415,9 +457,14 @@ export default function Dashboard() {
       avgTicket, tripsPerHour,
       profitPerHour: realProfitPerHour, 
       profitPerKm: realProfitPerKm, 
-      fuelCostPerKmPanel, fuelCostPerKmPump, maintenanceCostPerKm,
+      fuelCostPerKmPanel, 
+      fuelCostPerKmPump,
+      maintenanceCostPerKm,
       grossPerHour, grossPerKm, avgDailyIncome, 
-      clusterAvg, realAvg, bestApp
+      clusterAvg, 
+      realAvg: vehicleRealAvg, 
+      isRealAvgReliable, // Nova flag
+      bestApp
     });
 
     setChartData(Array.from(dailyMap.values()).sort((a, b) => a.day - b.day));
@@ -609,13 +656,21 @@ export default function Dashboard() {
             icon={Gauge} 
             color="orange" 
           />
+          
+          {/* Card Inteligente de Custo Real */}
           <SmartCard 
             title="Custo Gas./KM (Bomba)" 
             value={formatMoney(metrics.fuelCostPerKmPump)} 
-            subtitle={metrics.realAvg > 0 ? `Média Real: ${metrics.realAvg.toFixed(1)} km/l` : 'Falta reabastecer no período'} 
+            subtitle={
+                metrics.isRealAvgReliable 
+                ? `Média Real: ${metrics.realAvg.toFixed(1)} km/l` 
+                : 'Dados insuficientes (Use Painel)'
+            } 
             icon={Fuel} 
-            color="amber" 
+            color={metrics.isRealAvgReliable ? "amber" : "gray"}
+            alert={!metrics.isRealAvgReliable}
           />
+          
            <SmartCard 
             title="Outros Custos/KM" 
             value={formatMoney(metrics.maintenanceCostPerKm)} 
