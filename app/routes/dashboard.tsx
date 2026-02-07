@@ -1,6 +1,6 @@
 // app/routes/dashboard.tsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
@@ -22,6 +22,14 @@ const getBrandLogo = (brand: string) => {
   if (!brand) return "/logos/brands/generic.png";
   const safeBrand = brand.toLowerCase().trim().replace(/\s+/g, '-');
   return `/logos/brands/${safeBrand}.png`;
+};
+
+// === HELPER: SAUDAÇÃO DINÂMICA ===
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return "Bom dia";
+  if (hour >= 12 && hour < 18) return "Boa tarde";
+  return "Boa noite";
 };
 
 // === HELPER: DATA (Filtros Temporais) ===
@@ -49,27 +57,23 @@ const getStartEndDates = (date: Date, filter: TimeFilter) => {
   return { start, end };
 };
 
-// === LÓGICA DE MÉDIA REAL (TANQUE A TANQUE - CORRIGIDA) ===
+// === LÓGICA DE MÉDIA REAL (TANQUE A TANQUE) ===
 const calculateTankToTankEfficiency = (transactions: any[]) => {
-  // 1. Filtra tudo que parece combustível (tem litros) e ordena por DATA
   const fuels = transactions
     .filter(t => Number(t.liters) > 0) 
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Cronológico Crescente
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   if (fuels.length < 2) return 0;
 
   let totalDist = 0;
   let totalLiters = 0;
   
-  // Encontra os índices de todos os abastecimentos com TANQUE CHEIO
-  // Aceita snake_case (Supabase raw) ou camelCase
   const fullTankIndices = fuels
     .map((t, index) => (t.is_full_tank || t.fullTank || t.isFullTank) ? index : -1)
     .filter(index => index !== -1);
 
   if (fullTankIndices.length < 2) return 0;
 
-  // Percorre os intervalos entre Tanques Cheios
   for (let i = 0; i < fullTankIndices.length - 1; i++) {
     const startIdx = fullTankIndices[i];
     const endIdx = fullTankIndices[i+1];
@@ -77,16 +81,11 @@ const calculateTankToTankEfficiency = (transactions: any[]) => {
     const startTx = fuels[startIdx];
     const endTx = fuels[endIdx];
 
-    // Validação crítica: Precisamos dos Odômetros nos pontos de Tanque Cheio
     const startOdo = Number(startTx.odometer);
     const endOdo = Number(endTx.odometer);
 
     if (startOdo > 0 && endOdo > startOdo) {
       const dist = endOdo - startOdo;
-      
-      // Soma os litros consumidos NESTE intervalo
-      // Regra: Litros = (Abastecimentos parciais entre Start e End) + (Abastecimento que encheu o tanque no End)
-      // O abastecimento Start NÃO entra na conta de litros (ele serviu para o ciclo anterior)
       let litersInCycle = 0;
       for (let j = startIdx + 1; j <= endIdx; j++) {
          litersInCycle += Number(fuels[j].liters);
@@ -171,18 +170,19 @@ export default function Dashboard() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
   const [isVehicleMenuOpen, setIsVehicleMenuOpen] = useState(false);
+  const [userName, setUserName] = useState<string>("Motorista");
   
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [lastFuelPrice, setLastFuelPrice] = useState<number>(0); 
-  
-  // Novo State para Média Real Global
   const [vehicleRealAvg, setVehicleRealAvg] = useState<number>(0);
 
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('MONTH');
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // Métricas Consolidadas
+  // Ref para o input de data (usado para abrir o calendário nativo)
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
   const [metrics, setMetrics] = useState({
     income: 0, expense: 0, profit: 0,
     km: 0, hours: 0,
@@ -193,7 +193,7 @@ export default function Dashboard() {
     grossPerHour: 0, grossPerKm: 0, avgDailyIncome: 0,
     clusterAvg: 0, 
     realAvg: 0,
-    isRealAvgReliable: false, // Flag para saber se a média real foi calculada com sucesso
+    isRealAvgReliable: false, 
     bestApp: { name: '-', amount: 0 }
   });
 
@@ -209,11 +209,15 @@ export default function Dashboard() {
     setCurrentDate(newDate);
   };
 
-  // === 2. CARREGAR VEÍCULOS E PREFERÊNCIA ===
+  // === 2. CARREGAR DADOS (VEÍCULOS E NOME DO USUÁRIO) ===
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return; 
+
+      // Pega o nome para a saudação
+      const fullName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || "Motorista";
+      setUserName(fullName.split(' ')[0]); // Pega apenas o primeiro nome
 
       const { data: vehiclesData } = await supabase.from('vehicles').select('*').eq('user_id', session.user.id);
 
@@ -253,13 +257,11 @@ export default function Dashboard() {
     }
   };
 
-  // === 3. FETCH DADOS GLOBAIS DE COMBUSTÍVEL (CORRIGIDO) ===
+  // === 3. FETCH DADOS GLOBAIS DE COMBUSTÍVEL ===
   useEffect(() => {
     if (!selectedVehicleId) return;
 
     const fetchFuelStats = async () => {
-       // Busca TODAS as despesas que possam ser combustível (categorias ou tipos)
-       // Ordena por DATA DESCENDENTE (para pegar o preço mais recente primeiro)
        const { data } = await supabase
          .from('transactions')
          .select('*')
@@ -267,16 +269,12 @@ export default function Dashboard() {
          .eq('type', 'EXPENSE')
          .or('category.eq.FUEL, category.eq.Combustível, fuel_type.not.is.null') 
          .order('date', { ascending: false }) 
-         .limit(50); // Aumentei o limite para garantir pegar ciclos antigos se necessário
+         .limit(50); 
 
        if (data && data.length > 0) {
-          // 1. Preço Recente (Pega o primeiro que tiver preço > 0)
           const lastWithPrice = data.find((t:any) => Number(t.price_per_liter) > 0);
           if (lastWithPrice) setLastFuelPrice(Number(lastWithPrice.price_per_liter));
 
-          // 2. Média Real (Tanque a Tanque)
-          // Precisamos dos dados ordenados por DATA, mas a função espera um array
-          // Passamos tudo para a função calcular
           const efficiency = calculateTankToTankEfficiency(data);
           setVehicleRealAvg(efficiency);
        } else {
@@ -288,7 +286,7 @@ export default function Dashboard() {
     fetchFuelStats();
   }, [selectedVehicleId]);
 
-  // === 4. BUSCAR TRANSAÇÕES DO PERÍODO E CALCULAR ===
+  // === 4. BUSCAR TRANSAÇÕES E CALCULAR ===
   useEffect(() => {
     if (!selectedVehicleId) return;
     
@@ -317,8 +315,8 @@ export default function Dashboard() {
       const mappedTransactions: Transaction[] = (data || []).map((t: any) => {
         const amount = Number(t.amount) / 100;
         const split = t.split && Array.isArray(t.split) 
-           ? t.split.map((s: any) => ({ ...s, amount: Number(s.amount) / 100 })) 
-           : t.split;
+            ? t.split.map((s: any) => ({ ...s, amount: Number(s.amount) / 100 })) 
+            : t.split;
 
         return {
           id: t.id,
@@ -401,7 +399,6 @@ export default function Dashboard() {
         expense += val;
         dayData.expense += val;
         
-        // Verifica se é combustível de forma ampla
         const isFuel = exp.category === ExpenseCategory.FUEL || exp.category === 'FUEL' || exp.category === 'Combustível' || (t as any).fuelType;
         if (!isFuel) {
            maintenanceExpenses += val;
@@ -414,14 +411,10 @@ export default function Dashboard() {
     const avgTicket = trips > 0 ? (income / trips) : 0;
     const tripsPerHour = hours > 0 ? (trips / hours) : 0;
     
-    // Média do Painel (apenas informativa)
     const clusterAvg = countClusterEntries > 0 ? (sumClusterAvg / countClusterEntries) : 0;
-
-    // === CÁLCULO DE CUSTOS REAIS ===
     const isRealAvgReliable = vehicleRealAvg > 0;
     let fuelCostPerKmPump = 0;
 
-    // Se temos média real, usamos ela. Se não, usamos Painel como fallback
     const calcAvg = isRealAvgReliable ? vehicleRealAvg : clusterAvg;
 
     if (calcAvg > 0 && lastFuelPrice > 0) {
@@ -434,8 +427,6 @@ export default function Dashboard() {
     }
 
     const maintenanceCostPerKm = km > 0 ? (maintenanceExpenses / km) : 0;
-    
-    // Custo Total Estimado
     const totalCostPerKm = fuelCostPerKmPump + maintenanceCostPerKm;
     const totalOperationalCost = (totalCostPerKm * km); 
     
@@ -463,7 +454,7 @@ export default function Dashboard() {
       grossPerHour, grossPerKm, avgDailyIncome, 
       clusterAvg, 
       realAvg: vehicleRealAvg, 
-      isRealAvgReliable, // Nova flag
+      isRealAvgReliable, 
       bestApp
     });
 
@@ -471,25 +462,184 @@ export default function Dashboard() {
   };
 
   const formatMoney = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  
+  // === FORMATADOR DE TÍTULO ===
   const formatTitle = () => {
-    const opts: Intl.DateTimeFormatOptions = timeFilter === 'MONTH' ? { month: 'long', year: 'numeric' } : { day: 'numeric', month: 'short' };
+    if (timeFilter === 'WEEK') {
+        const { start, end } = getStartEndDates(currentDate, 'WEEK');
+        const fmt = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
+        return `${fmt(start)} - ${fmt(end)}`;
+    }
+    const opts: Intl.DateTimeFormatOptions = timeFilter === 'MONTH' 
+        ? { month: 'long', year: 'numeric' } 
+        : { day: 'numeric', month: 'long', year: 'numeric' }; 
     return currentDate.toLocaleDateString('pt-BR', opts);
+  };
+
+  // === HANDLERS PARA CALENDÁRIO ===
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.value) return;
+    const [y, m, d] = e.target.value.split('-').map(Number);
+    if (timeFilter === 'MONTH') {
+        setCurrentDate(new Date(y, m - 1, 1));
+    } else {
+        setCurrentDate(new Date(y, m - 1, d || 1));
+    }
+  };
+
+  const getInputValue = () => {
+     const y = currentDate.getFullYear();
+     const m = String(currentDate.getMonth() + 1).padStart(2, '0');
+     const d = String(currentDate.getDate()).padStart(2, '0');
+     if (timeFilter === 'MONTH') return `${y}-${m}`;
+     return `${y}-${m}-${d}`;
+  };
+
+  const handleOpenPicker = () => {
+    try {
+      if (dateInputRef.current && typeof dateInputRef.current.showPicker === 'function') {
+        dateInputRef.current.showPicker();
+      } else {
+        dateInputRef.current?.focus();
+        dateInputRef.current?.click();
+      }
+    } catch (err) {
+      console.error("Error opening date picker:", err);
+    }
   };
 
   const currentVehicle = vehicles.find(v => v.id === selectedVehicleId);
 
   return (
-    <div className="space-y-8 pb-24 animate-fade-in px-4 md:px-0">
+    <div className="space-y-6 md:space-y-8 pb-24 animate-fade-in px-4 md:px-0">
       
-      {/* === HEADER === */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mt-4">
+      {/* =========================================================== */}
+      {/* HEADER MOBILE - EXIBE APENAS EM MOBILE (md:hidden) */}
+      {/* =========================================================== */}
+      <header className="flex md:hidden flex-col gap-4 mt-2 mb-2">
+        {/* --- LINHA 1: SAUDAÇÃO E VEÍCULO (Estilo App) --- */}
+        <div className="flex justify-between items-center">
+          <div className="flex flex-col">
+            <h1 className="text-xl text-gray-400 font-normal">
+              {getGreeting()}, <span className="text-white font-bold">{userName}</span>
+            </h1>
+          </div>
+
+          {/* Botão de Veículo (Mobile) */}
+          <div className="relative z-50">
+            <button 
+              onClick={() => setIsVehicleMenuOpen(!isVehicleMenuOpen)}
+              className="flex items-center gap-2 bg-gray-800/40 backdrop-blur-md border border-gray-700/50 hover:border-emerald-500/50 text-white rounded-full py-1.5 px-3 pl-2 transition-all shadow-lg active:scale-95"
+            >
+              {currentVehicle ? (
+                <>
+                  <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center p-1 overflow-hidden shrink-0 shadow-sm">
+                      <img 
+                        src={getBrandLogo(currentVehicle.brand)} 
+                        alt={currentVehicle.brand}
+                        onError={(e) => { e.currentTarget.src = "/logos/brands/generic.png" }} 
+                        className="w-full h-full object-contain"
+                      />
+                  </div>
+                  <ChevronDown size={14} className={`text-gray-400 mr-1 transition-transform ${isVehicleMenuOpen ? 'rotate-180' : ''}`} />
+                </>
+              ) : (
+                <div className="w-8 h-8 bg-gray-700 rounded-full animate-pulse"/>
+              )}
+            </button>
+
+            {isVehicleMenuOpen && (
+              <div className="absolute top-full right-0 mt-3 w-[260px] bg-gray-900/95 backdrop-blur-xl border border-gray-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 z-[60]">
+                 <div className="p-3 border-b border-gray-800 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  Meus Veículos
+                </div>
+                <div className="max-h-[300px] overflow-y-auto p-2 space-y-1">
+                  {vehicles.map(v => (
+                    <button
+                      key={v.id}
+                      onClick={() => handleChangeVehicle(v.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${selectedVehicleId === v.id ? 'bg-emerald-500/10 border border-emerald-500/20' : 'hover:bg-white/5 border border-transparent'}`}
+                    >
+                        <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center p-1 shrink-0 shadow-sm">
+                            <img src={getBrandLogo(v.brand)} alt={v.brand} className="w-full h-full object-contain" />
+                        </div>
+                        <div className="text-left">
+                            <p className={`font-bold text-sm ${selectedVehicleId === v.id ? 'text-emerald-400' : 'text-white'}`}>{v.name}</p>
+                            <p className="text-gray-500 text-[10px] uppercase font-medium">{v.brand} {v.model}</p>
+                        </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* --- LINHA 2: CONTROLES UNIFICADOS MOBILE --- */}
+        <div className="bg-gray-800/20 backdrop-blur-md border border-white/5 p-1.5 rounded-2xl flex flex-col gap-2 shadow-inner">
+           {/* Seletor de Período */}
+           <div className="flex bg-gray-900/50 rounded-xl p-1 relative">
+             {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
+               <button 
+                 key={t} 
+                 onClick={() => setTimeFilter(t)} 
+                 className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all duration-200 relative z-10 ${
+                   timeFilter === t 
+                   ? 'text-white bg-gray-700 shadow-md'
+                   : 'text-gray-500 hover:text-gray-300'
+                 }`}
+               >
+                 {t === 'DAY' ? 'Dia' : t === 'WEEK' ? 'Semana' : 'Mês'}
+               </button>
+             ))}
+           </div>
+           
+           {/* Navegador de Data Mobile */}
+           <div className="flex items-center justify-between px-2 py-1">
+             <button 
+               onClick={() => navigateDate('prev')} 
+               className="w-10 h-10 flex items-center justify-center rounded-xl text-gray-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
+             >
+               <ChevronLeft size={22} />
+             </button>
+             
+             {/* DATA CLICÁVEL MOBILE (Chama handleOpenPicker) */}
+             <button 
+               onClick={handleOpenPicker}
+               className="relative flex-1 flex flex-col items-center justify-center cursor-pointer py-2 group bg-transparent border-none"
+             >
+               <span className="text-emerald-400 font-bold capitalize select-none text-base flex items-center gap-2 group-active:scale-95 transition-transform">
+                 <Calendar size={16} className="opacity-80"/>
+                 {formatTitle()}
+               </span>
+               <span className="text-[10px] text-gray-600 font-medium -mt-0.5 group-hover:text-gray-500 transition-colors">Toque para mudar</span>
+             </button>
+
+             <button 
+               onClick={() => navigateDate('next')} 
+               className="w-10 h-10 flex items-center justify-center rounded-xl text-gray-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
+             >
+               <ChevronRight size={22} />
+             </button>
+           </div>
+        </div>
+      </header>
+
+
+      {/* =========================================================== */}
+      {/* HEADER DESKTOP - EXIBE APENAS EM MD+ */}
+      {/* =========================================================== */}
+      <header className="hidden md:flex md:items-end justify-between gap-4 mt-4">
         <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-2">Visão Geral</h1>
-          <p className="text-gray-400 mt-1 text-sm">Resumo financeiro e operacional.</p>
+          {/* SAUDAÇÃO DESKTOP */}
+          <h1 className="text-3xl font-normal text-gray-400 flex items-center gap-2">
+            {getGreeting()}, <span className="text-white font-bold">{userName}</span>
+          </h1>
+          <p className="text-gray-400 mt-1 text-sm">Acompanhe seus indicadores.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-           {/* SELETOR DE VEÍCULO */}
+           {/* SELETOR DE VEÍCULO DESKTOP */}
            <div className="relative z-50">
               <button 
                 onClick={() => setIsVehicleMenuOpen(!isVehicleMenuOpen)}
@@ -499,10 +649,10 @@ export default function Dashboard() {
                   <>
                     <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center p-1 overflow-hidden shrink-0">
                        <img 
-                         src={getBrandLogo(currentVehicle.brand)} 
-                         alt={currentVehicle.brand}
-                         onError={(e) => { e.currentTarget.src = "/logos/brands/generic.png" }} 
-                         className="w-full h-full object-contain"
+                          src={getBrandLogo(currentVehicle.brand)} 
+                          alt={currentVehicle.brand}
+                          onError={(e) => { e.currentTarget.src = "/logos/brands/generic.png" }} 
+                          className="w-full h-full object-contain"
                        />
                     </div>
                     <div className="text-left flex-1 min-w-0">
@@ -541,7 +691,7 @@ export default function Dashboard() {
 
            <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
-           {/* FILTROS DE TEMPO */}
+           {/* FILTROS DE TEMPO DESKTOP */}
            <div className="bg-gray-900 p-1 rounded-xl flex border border-gray-800">
               {(['DAY', 'WEEK', 'MONTH'] as TimeFilter[]).map(t => (
                 <button key={t} onClick={() => setTimeFilter(t)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${timeFilter === t ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
@@ -550,10 +700,29 @@ export default function Dashboard() {
               ))}
            </div>
            
-           {/* NAVEGAÇÃO DE DATA */}
-           <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg">
+           {/* NAVEGAÇÃO DE DATA DESKTOP */}
+           <div className="bg-gray-900 border border-gray-800 rounded-xl p-1 flex items-center shadow-lg relative">
               <button onClick={() => navigateDate('prev')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronLeft size={20} /></button>
-              <div className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm"><Calendar size={16} />{formatTitle()}</div>
+              
+              {/* DATA CLICÁVEL DESKTOP */}
+              <button 
+                  onClick={handleOpenPicker}
+                  className="flex items-center gap-2 px-4 min-w-[120px] justify-center text-emerald-400 font-bold capitalize select-none text-sm hover:text-emerald-300 cursor-pointer transition-colors bg-transparent border-none"
+              >
+                  <Calendar size={16} />{formatTitle()}
+                  
+                  {/* INPUT DATE OCULTO - Ancorado aqui no Desktop para abrir embaixo */}
+                  <input 
+                      ref={dateInputRef}
+                      type={timeFilter === 'MONTH' ? 'month' : 'date'}
+                      className="sr-only" // Invisível mas funcional
+                      style={{ colorScheme: "dark" }} // FORÇA O DARK MODE NO CALENDÁRIO NATIVO
+                      onChange={handleDateChange}
+                      value={getInputValue()}
+                      aria-label="Selecionar data"
+                  />
+              </button>
+
               <button onClick={() => navigateDate('next')} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white"><ChevronRight size={20} /></button>
            </div>
         </div>
